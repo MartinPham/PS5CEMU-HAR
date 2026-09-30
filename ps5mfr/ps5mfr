@@ -1,104 +1,160 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
-version=1.0.1
-echo -e "PS5 Make FSELF Recursive v$version\nBy Alex-Free (C)2026\nhttps://github.com/alex-free/ps5-recursive-make-fself\nPowered by https://github.com/ps5-payload-dev/sdk/blob/master/samples/install_app/make_fself.py.\n"
+# Written in Python rather than bash so it runs on Windows too (see ps5mfr.bat), not just Linux and Mac OS.
 
-# Modified by build script for zip release to true.
-portable=true
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
 
-if [[ "$portable" == "true" ]]; then
-    # If you symlink the program script to an absolute path in a root privilaged dir, some things fail unless we only use the actual real path and not the symlink's. See https://github.com/alex-free/playstation-disc-burner/pull/2.
-    real_portable_folder="$(dirname "$(readlink -f "$0")")"
-    # Add all the self-contained binaries we need to the $PATH used within this script.
-    PATH=""$real_portable_folder"/bin${PATH:+:$PATH}"
-    echo $PATH
-fi
+version = "1.0.1"
 
-# When this script exits, automatically delete the temp directory.
-cleanup()
-{
-    if [[ -e "$tmp" ]]; then
-        echo "Clearing temp files..."
-        rm -r "$tmp"
-    fi
-}
-trap cleanup EXIT
+# Processed and reported in this order.
+file_types = (
+    # Signed Executable and Linkable Format (SELF) - https://www.psdevwiki.com/ps3/SELF_-_SPRX. Includes eboot.bin (main executable) and any others.
+    (".bin", "SELF"),
+    # ELF (I don't know if these are in PS5 games but lets just make sure).
+    (".elf", "ELF"),
+    # Playstation Relocatable Executable (Dynamic libraries for game) - https://www.psdevwiki.com/ps3/PRX.
+    (".prx", "PRX"),
+    # System PlayStation Relocatable Extension - (System Dynamic libraries) - https://www.psdevwiki.com/ps4/Libraries.
+    (".sprx", "SPRX"),
+)
 
-# Put temp directory in /var/tmp to guarantee enough space.
-tmp=$(mktemp -d --tmpdir -p /var/tmp dump-runable.XXX)
+elf_magic = b"\x7fELF"
 
-if [[ ! -f "$1"/eboot.bin ]]; then
-    echo "Error: first argument should be a PS5 game dump folder"
-    exit 1
-fi
 
-cd "$1"
+def find_make_fself():
+    # The portable zip ships make_fself.py in bin/. If you symlink the program script to an absolute path in a root privilaged dir, some things fail unless we only use the actual real path and not the symlink's. See https://github.com/alex-free/playstation-disc-burner/pull/2.
+    real_portable_folder = os.path.dirname(os.path.realpath(__file__))
+    portable = os.path.join(real_portable_folder, "bin", "make_fself.py")
+    if os.path.isfile(portable):
+        return portable
+    # Package installs put it in the $PATH instead.
+    return shutil.which("make_fself.py")
 
-# Signed Executable and Linkable Format (SELF) - https://www.psdevwiki.com/ps3/SELF_-_SPRX. Includes eboot.bin (main executable) and any others.
-self_count=0
 
-while IFS= read -r -d '' f; do
-    echo -e "\nFound "$f"\n"
-    cp "$f" $tmp
-    self_filename=$(basename "$f")
-    
-    # Redirect errors. Game (could??) have multiple .bin files, I mean eboot.bin for sure but maybe more. However, a .bin might not even be an actual SELF it might be something just containing data for the game. So any errors just silence here, make_fself.py ensures this doesn't matter if it isn't a SELF because it stops execution.
-    
-    if make_fself.py $tmp/"$self_filename" "$f" > /dev/null 2>&1; then
-        ((self_count++))
-    fi
+def long_path(path):
+    # Windows limits paths to 260 characters unless they have the \\?\ prefix, and a game dump can nest deep enough to hit that.
+    path = os.path.abspath(path)
+    if os.name != "nt" or path.startswith("\\\\?\\"):
+        return path
+    if path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path[2:]
+    return "\\\\?\\" + path
 
-    rm $tmp/"$self_filename"
-done < <(find . -type f -name "*.bin" -print0)
 
-# ELF (I don't know if these are in PS5 games but lets just make sure).
-elf_count=0
+def is_elf(path):
+    with open(path, "rb") as f:
+        return f.read(len(elf_magic)) == elf_magic
 
-while IFS= read -r -d '' f; do
-    echo -e "\nFound "$f"\n"
-    ((elf_count++))
-    cp "$f" $tmp
-    elf_filename=$(basename "$f")
-    make_fself.py $tmp/"$elf_filename" "$f"
-    rm $tmp/"$elf_filename"
-done < <(find . -type f -name "*.elf" -print0)
 
-# Playstation Relocatable Executable (Dynamic libraries for game) - https://www.psdevwiki.com/ps3/PRX.
-prx_count=0
+def fake_sign(make_fself, path, tmp):
+    # Runs make_fself.py on a temp copy, writing the result over the original. Returns (success, make_fself.py output).
+    tmp_copy = os.path.join(tmp, os.path.basename(path))
+    shutil.copyfile(path, tmp_copy)
+    before = os.stat(path)
+    success = False
+    try:
+        # make_fself.py prints file paths, which can contain characters the Windows code page can't encode when its output isn't a console.
+        result = subprocess.run([sys.executable, make_fself, tmp_copy, path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=dict(os.environ, PYTHONIOENCODING="utf-8"))
+        success = result.returncode == 0
+        return success, result.stdout.decode("utf-8", "replace")
+    finally:
+        after = os.stat(path)
+        if not success and (after.st_size, after.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
+            # make_fself.py got as far as overwriting the original before failing (or being interrupted), so put it back.
+            shutil.copyfile(tmp_copy, path)
+        os.remove(tmp_copy)
 
-while IFS= read -r -d '' f; do
-    echo -e "\nFound "$f"\n"
-    ((prx_count++))
-    cp "$f" $tmp
-    prx_filename=$(basename "$f")
-    make_fself.py $tmp/"$prx_filename" "$f"
-    rm $tmp/"$prx_filename"
-done < <(find . -type f -name "*.prx" -print0)
 
-# System PlayStation Relocatable Extension - (System Dynamic libraries) - https://www.psdevwiki.com/ps4/Libraries.
-sprx_count=0
+def walk_error(err):
+    print("Warning: could not read " + str(err.filename) + ": " + str(err.strerror))
 
-while IFS= read -r -d '' f; do
-    echo -e "\nFound "$f"\n"
-    ((sprx_count++))
-    cp "$f" $tmp
-    sprx_filename=$(basename "$f")
-    make_fself.py $tmp/"$sprx_filename" "$f"
-    rm $tmp/"$sprx_filename"
-done < <(find . -type f -name "*.sprx" -print0)
 
-if [[ "$self_count" -gt 0 ]]; then
-    echo "Fake signed $self_count SELF (.bin) file(s)."
-fi
+def main():
+    # Game dumps can have non-ASCII names, don't crash printing them to a console or pipe whose encoding can't represent them.
+    try:
+        sys.stdout.reconfigure(errors="replace")
+    except AttributeError:
+        pass
 
-if [[ "$elf_count" -gt 0 ]]; then
-    echo "Fake signed $elf_count ELF (.elf) file(s)."
-fi
+    print("PS5 Make FSELF Recursive v" + version + "\nBy Alex-Free (C)2026\nhttps://github.com/alex-free/ps5-recursive-make-fself\nPowered by https://github.com/ps5-payload-dev/sdk/blob/master/samples/install_app/make_fself.py.\n")
 
-if [[ "$prx_count" -gt 0 ]]; then
-    echo "Fake signed $prx_count PRX (.prx) file(s)."
-fi
+    dump = sys.argv[1] if len(sys.argv) == 2 else ""
+    if os.name == "nt":
+        # cmd passes "C:\dump\" as C:\dump" (the trailing \" is read as an escaped quote). Quotes can't be in Windows file names, so just drop them.
+        dump = dump.strip('"')
 
-if [[ "$sprx_count" -gt 0 ]]; then
-    echo "Fake signed $sprx_count SPRX (.sprx) file(s)."
-fi
+    if not os.path.isfile(os.path.join(dump, "eboot.bin")):
+        print("Error: first argument should be a PS5 game dump folder")
+        print("Usage: ps5mfr <path to decrypted game dump>")
+        return 1
+
+    make_fself = find_make_fself()
+    if make_fself is None:
+        print("Error: could not find make_fself.py")
+        return 1
+
+    root = long_path(dump)
+    found = {ext: [] for ext, _ in file_types}
+    for dirpath, dirnames, filenames in os.walk(root, onerror=walk_error):
+        dirnames.sort()
+        for filename in sorted(filenames):
+            path = os.path.join(dirpath, filename)
+            # Match extensions case insensitively, Windows file names are. Skip symlinks (like find -type f).
+            ext = os.path.splitext(filename)[1].lower()
+            if ext in found and not os.path.islink(path):
+                found[ext].append(path)
+
+    # Put temp directory in /var/tmp to guarantee enough space (/tmp is often in RAM). Windows' temp directory is already on disk.
+    tmp = tempfile.mkdtemp(prefix="ps5mfr.", dir="/var/tmp" if os.path.isdir("/var/tmp") else None)
+    signed = {ext: 0 for ext, _ in file_types}
+    failed = 0
+    try:
+        for ext, _ in file_types:
+            for path in found[ext]:
+                display = os.path.join(".", path[len(root):].lstrip(os.sep))
+                try:
+                    # A .bin might not even be an actual SELF, it might be something just containing data for the game. make_fself.py would refuse anything that isn't an ELF anyway, but checking first avoids copying what can be huge data files to the temp directory.
+                    if not is_elf(path):
+                        if ext != ".bin":
+                            print("\nSkipping " + display + ": not an ELF file (already fake signed?)")
+                        continue
+                    print("\nFound " + display + "\n")
+                    success, output = fake_sign(make_fself, path, tmp)
+                except OSError as err:
+                    success, output = False, str(err)
+                if ext != ".bin" or not success:
+                    print(output.rstrip("\n"))
+                if success:
+                    signed[ext] += 1
+                else:
+                    failed += 1
+                    print("Error: failed to fake sign " + display)
+    finally:
+        # Also runs when interrupted with Ctrl+C.
+        print("Clearing temp files...")
+        shutil.rmtree(tmp, ignore_errors=True)
+
+    for ext, name in file_types:
+        if signed[ext] > 0:
+            print("Fake signed " + str(signed[ext]) + " " + name + " (" + ext + ") file(s).")
+
+    if failed > 0:
+        print("Failed to fake sign " + str(failed) + " file(s), see above.")
+        return 1
+
+    if sum(signed.values()) == 0:
+        print("No ELF files found to fake sign (already done?).")
+
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        print("\nInterrupted.")
+        sys.exit(130)

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+Changes:
+
+* Windows support: `ps5mfr` is now a Python script (instead of bash), with a `ps5mfr.bat` launcher for Windows. Handles paths longer than Windows' 260 character limit.
+
+* The file counts only include files that were actually fake signed (failures were counted before), and failures are reported.
+
+* Files that are not ELF files are skipped before being copied to the temp directory, instead of copying large game data `.bin` files there only for `make_fself.py` to reject them.
+
+* If `make_fself.py` fails partway through writing a file, the original file is restored.
+
+----------------------------------------------------
+
 ## Version 1.0 (6/2/2026)
 
 Changes:

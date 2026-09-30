@@ -36,10 +36,14 @@ Changes:
 
 ## Usage
 
-`ps5mfr <path to decrypted game dump>`
+Linux and Mac OS: `./ps5mfr <path to decrypted game dump>`
+
+Windows: `ps5mfr.bat <path to decrypted game dump>`, or drag and drop the game dump folder onto `ps5mfr.bat`. Install [Python](https://www.python.org/downloads/) first.
 
 ## Notes
 
 * Finds any files with `.prx`, `.sprx`, `.bin`, or `.elf` recursively.
 
-* Requires python, but contains it's own copy of `make_fself.py`.
+* Requires Python 3.6 or newer, but contains it's own copy of `make_fself.py`.
+
+* Files that are not ELF files are left alone, so running it again on an already fake signed dump is harmless.
