@@ -46,4 +46,6 @@ Windows: `ps5mfr.bat <path to decrypted game dump>`, or drag and drop the game d
 
 * Requires Python 3.6 or newer, but contains it's own copy of `make_fself.py`.
 
-* Files that are not ELF files are left alone, so running it again on an already fake signed dump is harmless.
+* Files that are not ELF files are left alone, so running it again on an already fake signed dump is harmless. It tells you about files that are already fake signed, or still encrypted.
+
+* Leaves the `decrypted` folder alone, which [ps5 app dumper](https://github.com/EchoStretch/ps5-app-dumper) keeps plain copies of the executables in (with its `enable_elf2fself` or `enable_backport` options on). Files in there that an earlier version of ps5mfr fake signed are restored, but only when the restored file is verified to be exactly the original.

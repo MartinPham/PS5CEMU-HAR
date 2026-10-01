@@ -12,6 +12,10 @@ Changes:
 
 * If `make_fself.py` fails partway through writing a file, the original file is restored.
 
+* No longer fake signs the plain copies in ps5 app dumper's `decrypted` backup folder, and restores the ones earlier versions did (checked against the SHA-256 of the original that `make_fself.py` stores in each file).
+
+* Says when files are skipped because they're already fake signed or still encrypted, including `eboot.bin`.
+
 ----------------------------------------------------
 
 ## Version 1.0 (6/2/2026)
