@@ -4,11 +4,14 @@
 
 import hashlib
 import os
+import platform
 import shutil
 import struct
 import subprocess
 import sys
 import tempfile
+import time
+import traceback
 
 version = "1.0.1"
 
@@ -35,11 +38,47 @@ PT_SCE_VERSION = 0x6FFFFF01
 # With its enable_elf2fself or enable_backport options on, ps5-app-dumper keeps plain copies of the decrypted executables in this folder of the dump (its "Undo FSELF" restores from there), so it must not be fake signed.
 backup_folder = "decrypted"
 
+# If you symlink the program script to an absolute path in a root privilaged dir, some things fail unless we only use the actual real path and not the symlink's. See https://github.com/alex-free/playstation-disc-burner/pull/2.
+program_folder = os.path.dirname(os.path.realpath(__file__))
+
+log_file = None
+
+
+def open_log(label):
+    # One log per run in logs/ next to the program, like ps5-app-dumper does. Package installs can't write there, so fall back to the home folder.
+    global log_file
+    name = "ps5mfr_" + (label + "_" if label else "") + time.strftime("%Y-%m-%d_%H-%M-%S") + ".log"
+    for folder in (os.path.join(program_folder, "logs"), os.path.join(os.path.expanduser("~"), "ps5mfr-logs")):
+        try:
+            os.makedirs(folder, exist_ok=True)
+            log_file = open(os.path.join(folder, name), "w", encoding="utf-8")
+            return
+        except OSError:
+            pass
+    print("Warning: could not create a log file.")
+
+
+def log(text=""):
+    # Only to the log file, timestamped. A log that can't be written to mustn't stop the actual work.
+    if log_file is None:
+        return
+    stamp = time.strftime("[%H:%M:%S] ")
+    try:
+        log_file.write("".join(stamp + line + "\n" for line in text.split("\n")))
+        log_file.flush()
+    except OSError:
+        pass
+
+
+def out(text=""):
+    # To the screen and the log file.
+    print(text)
+    log(text)
+
 
 def find_make_fself():
-    # The portable zip ships make_fself.py in bin/. If you symlink the program script to an absolute path in a root privilaged dir, some things fail unless we only use the actual real path and not the symlink's. See https://github.com/alex-free/playstation-disc-burner/pull/2.
-    real_portable_folder = os.path.dirname(os.path.realpath(__file__))
-    portable = os.path.join(real_portable_folder, "bin", "make_fself.py")
+    # The portable zip ships make_fself.py in bin/.
+    portable = os.path.join(program_folder, "bin", "make_fself.py")
     if os.path.isfile(portable):
         return portable
     # Package installs put it in the $PATH instead.
@@ -130,7 +169,7 @@ def repair_backup(backup, root):
                     fself = f.read()
                 elf = unfself(fself)
                 if elf is None:
-                    print("Warning: " + display + " was fake signed and can't be restored exactly, dump the game again for a clean copy of it.")
+                    out("Warning: " + display + " was fake signed and can't be restored exactly, dump the game again for a clean copy of it.")
                     failed += 1
                     continue
                 try:
@@ -141,10 +180,10 @@ def repair_backup(backup, root):
                         f.write(fself)
                     raise
             except OSError as err:
-                print("Error: could not restore " + display + ": " + str(err))
+                out("Error: could not restore " + display + ": " + str(err))
                 failed += 1
                 continue
-            print("Restored " + display + " to the plain ELF.")
+            out("Restored " + display + " to the plain ELF.")
             restored += 1
     return restored, failed
 
@@ -159,7 +198,8 @@ def fake_sign(make_fself, path, tmp):
         # make_fself.py prints file paths, which can contain characters the Windows code page can't encode when its output isn't a console.
         result = subprocess.run([sys.executable, make_fself, tmp_copy, path], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=dict(os.environ, PYTHONIOENCODING="utf-8"))
         success = result.returncode == 0
-        return success, result.stdout.decode("utf-8", "replace")
+        # Windows line endings would come out doubled once written to the log.
+        return success, result.stdout.decode("utf-8", "replace").replace("\r\n", "\n")
     finally:
         after = os.stat(path)
         if not success and (after.st_size, after.st_mtime_ns) != (before.st_size, before.st_mtime_ns):
@@ -169,7 +209,7 @@ def fake_sign(make_fself, path, tmp):
 
 
 def walk_error(err):
-    print("Warning: could not read " + str(err.filename) + ": " + str(err.strerror))
+    out("Warning: could not read " + str(err.filename) + ": " + str(err.strerror))
 
 
 def main():
@@ -179,8 +219,6 @@ def main():
     except AttributeError:
         pass
 
-    print("PS5 Make FSELF Recursive v" + version + "\nBy Alex-Free (C)2026\nhttps://github.com/alex-free/ps5-recursive-make-fself\nPowered by https://github.com/ps5-payload-dev/sdk/blob/master/samples/install_app/make_fself.py.\n")
-
     dump = sys.argv[1] if len(sys.argv) == 2 else ""
     if os.name == "nt":
         # cmd passes "C:\dump\" as C:\dump" (the trailing \" is read as an escaped quote). Quotes can't be in Windows file names, so just drop them.
@@ -189,20 +227,32 @@ def main():
         if dump.endswith(":"):
             dump += "\\"
 
+    open_log(os.path.basename(os.path.abspath(dump)) if dump else "")
+    log("ps5mfr v" + version + " log, started " + time.strftime("%Y-%m-%d %H:%M:%S"))
+    log("Arguments: " + " ".join('"' + arg + '"' for arg in sys.argv[1:]))
+    log("Python " + sys.version.split()[0] + ": " + sys.executable)
+    log("System: " + platform.platform())
+    log()
+
+    out("PS5 Make FSELF Recursive v" + version + "\nBy Alex-Free (C)2026\nhttps://github.com/alex-free/ps5-recursive-make-fself\nPowered by https://github.com/ps5-payload-dev/sdk/blob/master/samples/install_app/make_fself.py.\n")
+
     root = long_path(dump) if dump else ""
     if not root or not os.path.isfile(os.path.join(root, "eboot.bin")):
-        print("Error: first argument should be a PS5 game dump folder")
-        print("Usage: ps5mfr <path to decrypted game dump>")
+        out("Error: first argument should be a PS5 game dump folder")
+        out("Usage: ps5mfr <path to decrypted game dump>")
         return 1
 
     if os.path.basename(root) == backup_folder and os.path.isfile(os.path.join(os.path.dirname(root), "eboot.bin")):
-        print("Error: " + dump + " is ps5-app-dumper's backup of the plain ELF files, run ps5mfr on the game dump folder it is in instead.")
+        out("Error: " + dump + " is ps5-app-dumper's backup of the plain ELF files, run ps5mfr on the game dump folder it is in instead.")
         return 1
 
     make_fself = find_make_fself()
     if make_fself is None:
-        print("Error: could not find make_fself.py")
+        out("Error: could not find make_fself.py")
         return 1
+
+    log("Dump folder: " + root)
+    log("make_fself.py: " + make_fself)
 
     found = {ext: [] for ext, _ in file_types}
     backup = None
@@ -217,13 +267,14 @@ def main():
             ext = os.path.splitext(filename)[1].lower()
             if ext in found and not os.path.islink(path):
                 found[ext].append(path)
+    log("Files found: " + ", ".join(str(len(found[ext])) + " " + ext for ext, _ in file_types))
 
-    # Put temp directory in /var/tmp to guarantee enough space (/tmp is often in RAM). Windows' temp directory is already on disk.
     restored = unrestorable = 0
     if backup:
-        print("Leaving " + relative(backup, root) + " alone, it's ps5-app-dumper's backup of the plain ELF files.")
+        out("Leaving " + relative(backup, root) + " alone, it's ps5-app-dumper's backup of the plain ELF files.")
         restored, unrestorable = repair_backup(backup, root)
 
+    # Put temp directory in /var/tmp to guarantee enough space (/tmp is often in RAM). Windows' temp directory is already on disk.
     tmp = tempfile.mkdtemp(prefix="ps5mfr.", dir="/var/tmp" if os.name != "nt" and os.path.isdir("/var/tmp") else None)
     signed = {ext: 0 for ext, _ in file_types}
     failed = already = encrypted = 0
@@ -237,58 +288,76 @@ def main():
                     if kind != "elf":
                         if kind == "fself":
                             already += 1
-                            print("\nSkipping " + display + ": already fake signed")
+                            out("\nSkipping " + display + ": already fake signed")
                         elif kind == "encrypted":
                             encrypted += 1
-                            print("\nSkipping " + display + ": still encrypted, it has to be decrypted first")
+                            out("\nSkipping " + display + ": still encrypted, it has to be decrypted first")
                         elif ext != ".bin":
-                            print("\nSkipping " + display + ": not an ELF file")
+                            out("\nSkipping " + display + ": not an ELF file")
+                        else:
+                            # Game data, too many of those to list on screen.
+                            log("Skipping " + display + ": not an ELF file")
                         continue
-                    print("\nFound " + display + "\n")
+                    out("\nFound " + display + "\n")
                     success, output = fake_sign(make_fself, path, tmp)
                 except OSError as err:
                     success, output = False, str(err)
                 if ext != ".bin" or not success:
-                    print(output.rstrip("\n"))
+                    out(output.rstrip("\n"))
+                else:
+                    log(output.rstrip("\n"))
                 if success:
                     signed[ext] += 1
                 else:
                     failed += 1
-                    print("Error: failed to fake sign " + display)
+                    out("Error: failed to fake sign " + display)
     finally:
         # Also runs when interrupted with Ctrl+C.
-        print("Clearing temp files...")
+        out("Clearing temp files...")
         shutil.rmtree(tmp, ignore_errors=True)
 
     for ext, name in file_types:
         if signed[ext] > 0:
-            print("Fake signed " + str(signed[ext]) + " " + name + " (" + ext + ") file(s).")
+            out("Fake signed " + str(signed[ext]) + " " + name + " (" + ext + ") file(s).")
 
     if restored > 0:
-        print("Restored " + str(restored) + " file(s) in " + relative(backup, root) + " that an earlier ps5mfr run had fake signed.")
+        out("Restored " + str(restored) + " file(s) in " + relative(backup, root) + " that an earlier ps5mfr run had fake signed.")
 
     if encrypted > 0:
-        print("Warning: " + str(encrypted) + " file(s) are still encrypted and were left alone, the game won't run until they are decrypted.")
+        out("Warning: " + str(encrypted) + " file(s) are still encrypted and were left alone, the game won't run until they are decrypted.")
 
     if failed > 0 or unrestorable > 0:
         if failed > 0:
-            print("Failed to fake sign " + str(failed) + " file(s), see above.")
+            out("Failed to fake sign " + str(failed) + " file(s), see above.")
         if unrestorable > 0:
-            print("Could not restore " + str(unrestorable) + " file(s) in " + relative(backup, root) + ", see above.")
+            out("Could not restore " + str(unrestorable) + " file(s) in " + relative(backup, root) + ", see above.")
         return 1
 
     if sum(signed.values()) == 0 and encrypted == 0:
         if already > 0:
-            print("Nothing to do, this dump is already fake signed. ps5-app-dumper does that itself when its enable_elf2fself option is on.")
+            out("Nothing to do, this dump is already fake signed. ps5-app-dumper does that itself when its enable_elf2fself option is on.")
         else:
-            print("No ELF files found to fake sign.")
+            out("No ELF files found to fake sign.")
 
     return 0
 
 
-if __name__ == "__main__":
+def run():
     try:
-        sys.exit(main())
+        code = main()
     except KeyboardInterrupt:
-        print("\nInterrupted.")
-        sys.exit(130)
+        out("\nInterrupted.")
+        code = 130
+    except Exception:
+        out(traceback.format_exc().rstrip("\n"))
+        out("Error: ps5mfr crashed, please report this along with the log file.")
+        code = 1
+    if log_file is not None:
+        log("Exit code: " + str(code))
+        log_file.close()
+        print("\nLog saved to " + log_file.name)
+    return code
+
+
+if __name__ == "__main__":
+    sys.exit(run())
