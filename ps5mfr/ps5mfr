@@ -2,8 +2,10 @@
 
 # Written in Python rather than bash so it runs on Windows too (see ps5mfr.bat), not just Linux and Mac OS.
 
+import hashlib
 import os
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -23,6 +25,15 @@ file_types = (
 )
 
 elf_magic = b"\x7fELF"
+# What make_fself.py writes. PS4 retail SELFs share it.
+fself_magic = b"\x4f\x15\x3d\x1d"
+# PS5 retail SELF, still encrypted.
+ps5_self_magic = b"\x54\x14\xf5\xee"
+
+PT_SCE_VERSION = 0x6FFFFF01
+
+# With its enable_elf2fself or enable_backport options on, ps5-app-dumper keeps plain copies of the decrypted executables in this folder of the dump (its "Undo FSELF" restores from there), so it must not be fake signed.
+backup_folder = "decrypted"
 
 
 def find_make_fself():
@@ -45,9 +56,97 @@ def long_path(path):
     return "\\\\?\\" + path
 
 
-def is_elf(path):
+def relative(path, root):
+    return os.path.join(".", path[len(root):].lstrip(os.sep))
+
+
+def file_kind(path):
+    # Returns "elf", "fself" (already fake signed), "encrypted" (retail SELF) or None (anything else, like game data).
     with open(path, "rb") as f:
-        return f.read(len(elf_magic)) == elf_magic
+        header = f.read(32)
+        if header[:4] == elf_magic:
+            return "elf"
+        if header[:4] == ps5_self_magic:
+            return "encrypted"
+        if header[:4] != fself_magic or len(header) < 32:
+            return None
+        entries = f.read(32 * struct.unpack_from("<H", header, 24)[0])
+    # Bit 1 of an entry's properties marks it encrypted, make_fself.py never sets it.
+    for offset in range(0, len(entries) - 31, 32):
+        if struct.unpack_from("<Q", entries, offset)[0] & 0x2:
+            return "encrypted"
+    return "fself"
+
+
+def unfself(data):
+    # Rebuilds the ELF that make_fself.py made a fake signed SELF from, laid out the way ps5-app-dumper writes decrypted ELFs: the headers, then each segment at its file offset, zeros in between.
+    # Returns None unless that matches the SHA-256 of the original ELF which make_fself.py stores in the SELF, so it's exact or nothing.
+    try:
+        file_size, num_entries = struct.unpack_from("<QH", data, 16)
+        elf_offset = 32 + 32 * num_entries
+        phoff = struct.unpack_from("<Q", data, elf_offset + 32)[0]
+        ehsize, phentsize, phnum = struct.unpack_from("<3H", data, elf_offset + 52)
+        headers_size = max(ehsize, phoff + phentsize * phnum)
+        digest_offset = elf_offset + ((headers_size + 15) & ~15) + 32
+        digest = data[digest_offset:digest_offset + 32]
+        phdrs = [struct.unpack_from("<2I6Q", data, elf_offset + phoff + i * phentsize) for i in range(phnum)]
+
+        pieces = [(0, data[elf_offset:elf_offset + headers_size])]
+        for i in range(num_entries):
+            props, offset, filesz, _ = struct.unpack_from("<4Q", data, 32 + 32 * i)
+            # Entries come in pairs: a segment's block digests, then (with bit 11 set) its data and the index of its program header.
+            if props & 0x800:
+                pieces.append((phdrs[(props >> 20) & 0xFFFF][2], data[offset:offset + filesz]))
+        for p_type, _, p_offset, _, _, p_filesz, _, _ in phdrs:
+            if p_type == PT_SCE_VERSION:
+                # Appended after everything else.
+                pieces.append((p_offset, data[file_size:file_size + p_filesz]))
+
+        elf = bytearray(max([headers_size] + [phdr[2] + phdr[5] for phdr in phdrs]))
+        for offset, piece in pieces:
+            if offset + len(piece) > len(elf):
+                return None
+            elf[offset:offset + len(piece)] = piece
+    except (struct.error, IndexError):
+        return None
+    return bytes(elf) if hashlib.sha256(elf).digest() == digest else None
+
+
+def repair_backup(backup, root):
+    # ps5mfr used to fake sign the copies in the backup folder too, put the plain ELFs back. Returns (restored, failed).
+    restored = failed = 0
+    extensions = [ext for ext, _ in file_types]
+    for dirpath, dirnames, filenames in os.walk(backup, onerror=walk_error):
+        dirnames.sort()
+        for filename in sorted(filenames):
+            path = os.path.join(dirpath, filename)
+            if os.path.splitext(filename)[1].lower() not in extensions or os.path.islink(path):
+                continue
+            display = relative(path, root)
+            try:
+                if file_kind(path) != "fself":
+                    continue
+                with open(path, "rb") as f:
+                    fself = f.read()
+                elf = unfself(fself)
+                if elf is None:
+                    print("Warning: " + display + " was fake signed and can't be restored exactly, dump the game again for a clean copy of it.")
+                    failed += 1
+                    continue
+                try:
+                    with open(path, "wb") as f:
+                        f.write(elf)
+                except BaseException:
+                    with open(path, "wb") as f:
+                        f.write(fself)
+                    raise
+            except OSError as err:
+                print("Error: could not restore " + display + ": " + str(err))
+                failed += 1
+                continue
+            print("Restored " + display + " to the plain ELF.")
+            restored += 1
+    return restored, failed
 
 
 def fake_sign(make_fself, path, tmp):
@@ -86,10 +185,18 @@ def main():
     if os.name == "nt":
         # cmd passes "C:\dump\" as C:\dump" (the trailing \" is read as an escaped quote). Quotes can't be in Windows file names, so just drop them.
         dump = dump.strip('"')
+        # Which turns "D:\" into D: and that alone means the current folder of drive D.
+        if dump.endswith(":"):
+            dump += "\\"
 
-    if not os.path.isfile(os.path.join(dump, "eboot.bin")):
+    root = long_path(dump) if dump else ""
+    if not root or not os.path.isfile(os.path.join(root, "eboot.bin")):
         print("Error: first argument should be a PS5 game dump folder")
         print("Usage: ps5mfr <path to decrypted game dump>")
+        return 1
+
+    if os.path.basename(root) == backup_folder and os.path.isfile(os.path.join(os.path.dirname(root), "eboot.bin")):
+        print("Error: " + dump + " is ps5-app-dumper's backup of the plain ELF files, run ps5mfr on the game dump folder it is in instead.")
         return 1
 
     make_fself = find_make_fself()
@@ -97,9 +204,12 @@ def main():
         print("Error: could not find make_fself.py")
         return 1
 
-    root = long_path(dump)
     found = {ext: [] for ext, _ in file_types}
+    backup = None
     for dirpath, dirnames, filenames in os.walk(root, onerror=walk_error):
+        if dirpath == root and backup_folder in dirnames:
+            dirnames.remove(backup_folder)
+            backup = os.path.join(root, backup_folder)
         dirnames.sort()
         for filename in sorted(filenames):
             path = os.path.join(dirpath, filename)
@@ -109,18 +219,30 @@ def main():
                 found[ext].append(path)
 
     # Put temp directory in /var/tmp to guarantee enough space (/tmp is often in RAM). Windows' temp directory is already on disk.
-    tmp = tempfile.mkdtemp(prefix="ps5mfr.", dir="/var/tmp" if os.path.isdir("/var/tmp") else None)
+    restored = unrestorable = 0
+    if backup:
+        print("Leaving " + relative(backup, root) + " alone, it's ps5-app-dumper's backup of the plain ELF files.")
+        restored, unrestorable = repair_backup(backup, root)
+
+    tmp = tempfile.mkdtemp(prefix="ps5mfr.", dir="/var/tmp" if os.name != "nt" and os.path.isdir("/var/tmp") else None)
     signed = {ext: 0 for ext, _ in file_types}
-    failed = 0
+    failed = already = encrypted = 0
     try:
         for ext, _ in file_types:
             for path in found[ext]:
-                display = os.path.join(".", path[len(root):].lstrip(os.sep))
+                display = relative(path, root)
                 try:
                     # A .bin might not even be an actual SELF, it might be something just containing data for the game. make_fself.py would refuse anything that isn't an ELF anyway, but checking first avoids copying what can be huge data files to the temp directory.
-                    if not is_elf(path):
-                        if ext != ".bin":
-                            print("\nSkipping " + display + ": not an ELF file (already fake signed?)")
+                    kind = file_kind(path)
+                    if kind != "elf":
+                        if kind == "fself":
+                            already += 1
+                            print("\nSkipping " + display + ": already fake signed")
+                        elif kind == "encrypted":
+                            encrypted += 1
+                            print("\nSkipping " + display + ": still encrypted, it has to be decrypted first")
+                        elif ext != ".bin":
+                            print("\nSkipping " + display + ": not an ELF file")
                         continue
                     print("\nFound " + display + "\n")
                     success, output = fake_sign(make_fself, path, tmp)
@@ -142,12 +264,24 @@ def main():
         if signed[ext] > 0:
             print("Fake signed " + str(signed[ext]) + " " + name + " (" + ext + ") file(s).")
 
-    if failed > 0:
-        print("Failed to fake sign " + str(failed) + " file(s), see above.")
+    if restored > 0:
+        print("Restored " + str(restored) + " file(s) in " + relative(backup, root) + " that an earlier ps5mfr run had fake signed.")
+
+    if encrypted > 0:
+        print("Warning: " + str(encrypted) + " file(s) are still encrypted and were left alone, the game won't run until they are decrypted.")
+
+    if failed > 0 or unrestorable > 0:
+        if failed > 0:
+            print("Failed to fake sign " + str(failed) + " file(s), see above.")
+        if unrestorable > 0:
+            print("Could not restore " + str(unrestorable) + " file(s) in " + relative(backup, root) + ", see above.")
         return 1
 
-    if sum(signed.values()) == 0:
-        print("No ELF files found to fake sign (already done?).")
+    if sum(signed.values()) == 0 and encrypted == 0:
+        if already > 0:
+            print("Nothing to do, this dump is already fake signed. ps5-app-dumper does that itself when its enable_elf2fself option is on.")
+        else:
+            print("No ELF files found to fake sign.")
 
     return 0
 
