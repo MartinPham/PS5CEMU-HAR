@@ -44,6 +44,8 @@ Windows: `ps5mfr.bat <path to decrypted game dump>`, or drag and drop the game d
 
 * Finds any files with `.prx`, `.sprx`, `.bin`, or `.elf` recursively.
 
+* Every run writes a log to the `logs` folder next to ps5mfr (or `ps5mfr-logs` in your home folder if that one isn't writable), its location is shown at the end. It has more detail than the screen (like `make_fself.py`'s output for every file), so include it when reporting a problem.
+
 * Requires Python 3.6 or newer, but contains it's own copy of `make_fself.py`.
 
 * Files that are not ELF files are left alone, so running it again on an already fake signed dump is harmless. It tells you about files that are already fake signed, or still encrypted.

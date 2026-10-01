@@ -16,6 +16,8 @@ Changes:
 
 * Says when files are skipped because they're already fake signed or still encrypted, including `eboot.bin`.
 
+* Writes a log of every run to `logs/`, with more detail than the screen, and the error if ps5mfr crashes.
+
 ----------------------------------------------------
 
 ## Version 1.0 (6/2/2026)
