@@ -1,0 +1,10 @@
+# PS5CEMU-HAR builds
+
+The app folder for the PS5, zipped: extract it and copy `PPSA99360` to `/data/homebrew/PPSA99360`
+(see the project's [README](https://github.com/premohq/PS5CEMU-HAR#install)).
+
+| Version | Download | Built from |
+|---|---|---|
+| 2.0.0 | [PS5CEMU-HAR-v2.0.0.zip](PS5CEMU-HAR-v2.0.0.zip) | [v2.0.0](https://github.com/premohq/PS5CEMU-HAR/releases/tag/v2.0.0) |
+
+`SHA256SUMS` has each file's checksum.
