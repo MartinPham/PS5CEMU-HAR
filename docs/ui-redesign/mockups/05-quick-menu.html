@@ -2,16 +2,17 @@
 <html lang="en"><head><meta charset="utf-8"><title>Quick Menu</title>
 <link rel="stylesheet" href="tokens.css"><script src="kit.js"></script>
 <style>
-	/* the game, a 3DS one in the Large top layout on the Waves border, pushed back and dimmed */
-	.game { position: absolute; inset: 0; transform: scale(0.94) translateX(48px); transform-origin: 70% 50%; border-radius: 28px; overflow: hidden; filter: saturate(0.85);
+	/* the game, a 3DS one in the Large top layout on the Waves border, left where it is and dimmed by one
+	   quad (no scaling, no glass in a game: the performance contract, 4.2) */
+	.game { position: absolute; inset: 0; overflow: hidden;
 		background: repeating-radial-gradient(140% 70% at 50% 130%, rgba(255, 220, 140, 0.16) 0 4%, transparent 4% 9%), linear-gradient(180deg, #e9a62a, #a8660a); }
 	.game .top { position: absolute; left: 160px; top: 150px; width: 1200px; height: 720px; border-radius: 6px;
 		background: radial-gradient(30% 30% at 62% 46%, #e8323a 0 40%, #7a0e14 41% 46%, transparent 47%), radial-gradient(80% 60% at 50% 100%, #2a6e3a, transparent 70%), linear-gradient(180deg, #4a83d8, #14306e); }
 	.game .bottom { position: absolute; left: 1390px; top: 470px; width: 400px; height: 300px; border-radius: 6px; background: linear-gradient(160deg, #0a1840, #24305c); }
 	.scrim { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(3, 5, 10, 0.86) 0 30%, rgba(3, 5, 10, 0.55) 60%, rgba(3, 5, 10, 0.45)); }
 
-	.sheet { position: absolute; left: 48px; top: 48px; width: 640px; height: 984px; border-radius: var(--r-sheet); background: rgba(12, 16, 26, 0.88); border: 1.5px solid rgba(255, 255, 255, 0.12);
-		box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6); backdrop-filter: blur(30px); padding: 36px 36px 0; }
+	.sheet { position: absolute; left: 48px; top: 48px; width: 640px; height: 984px; border-radius: var(--r-sheet); background: rgba(10, 15, 27, 0.92); border: 1.5px solid rgba(255, 255, 255, 0.12);
+		box-shadow: 0 40px 120px rgba(0, 0, 0, 0.6); padding: 36px 36px 0; }
 	.head { display: flex; gap: 22px; align-items: center; }
 	.head .cv { width: 104px; height: 96px; }
 	.head .t { font: 650 30px/1.15 Lexend; }

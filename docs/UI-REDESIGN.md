@@ -1,16 +1,15 @@
 # PS5CEMU-HAR: the UI redesign
 
-**Status:** proposal, for discussion · **Covers:** the launcher, the in-game menus, and the code behind
-them · **Mockups:** [`docs/ui-redesign/`](ui-redesign/), from HTML sources in
+**Status:** adopted, 2026-10-06: the plan for PS5CEMU-HAR's UI from here on · **Covers:** the
+launcher, the in-game menus, and the code behind them · **Mockups:** [`docs/ui-redesign/`](ui-redesign/), from HTML sources in
 [`docs/ui-redesign/mockups/`](ui-redesign/mockups/)
 
-This document proposes replacing PS5CEMU-HAR's interface with one that feels like it belongs on a
-PS5: one app for both emulators, each on its own side, drawn on the GPU at 4K, with motion, sound and
-controller conventions taken from the console itself. Every feature the app has today stays. The document covers
-what was studied, what the new design is, and what the code change involves, file by file and phase
-by phase.
+This document is the plan for PS5CEMU-HAR's interface: one that feels like it belongs on a PS5: one app for both emulators, each on its own side, drawn on the GPU at 4K, with motion, sound and
+controller conventions taken from the console itself. Every feature the app has today stays, and none of it may cost the emulators performance (4.2). The
+document covers what was studied, what the design is, and what the code change involves, file by file
+and phase by phase.
 
-![The proposed Home screen](ui-redesign/01-home.jpg)
+![The Home screen, on the Wii U side](ui-redesign/01-home.jpg)
 
 <sub>All mockups are 1920 × 1080, the layout canvas the app scales to 4K. The covers are stand-ins drawn
 by the mockup kit: the app shows GameTDB's box art, as it does today. Mockup text such as play times and
@@ -21,7 +20,7 @@ frame rates is illustrative.</sub>
 1. [Summary](#1-summary)
 2. [The UI today](#2-the-ui-today)
 3. [Research: what makes an emulator UI good, on a PS5 and elsewhere](#3-research-what-makes-an-emulator-ui-good-on-a-ps5-and-elsewhere)
-4. [Principles](#4-principles)
+4. [Principles and the performance contract](#4-principles-and-the-performance-contract)
 5. [Cemu and Azahar: two sides of one app](#5-cemu-and-azahar-two-sides-of-one-app)
 6. [Screens](#6-screens)
 7. [Visual system](#7-visual-system)
@@ -38,15 +37,16 @@ frame rates is illustrative.</sub>
 
 ## 1. Summary
 
-Five changes do most of the work:
+Six decisions do most of the work:
 
 1. **Two sides, one app.** With the Wii U side picked, Home and the Library show only Wii U games; with
    the 3DS side picked, only 3DS games. The sides become two states of one shell: one design, one
    codebase, one Settings. A switch at the top left (or one click of the touchpad) moves between
-   them, the app remembers the side, and the start screen stays as an option
-   ([section 5](#5-cemu-and-azahar-two-sides-of-one-app)).
+   them, the app remembers the side, and the start screen stays as an option. Behind the focused game
+   is its own picture: a Wii U game's boot screen, a 3DS game's screenshot
+   ([section 5](#5-cemu-and-azahar-two-sides-of-one-app), [7.4](#74-covers-boot-screens-screenshots-and-the-backdrop)).
 2. **The launcher moves to the GPU.** Today it is drawn by SDL's software renderer at 1080p, which
-   rules out the motion, depth and 4K text that make a console UI feel finished. The proposal is a
+   rules out the motion, depth and 4K text that make a console UI feel finished. The design is a
    small Vulkan renderer on the RADV driver the app already links, drawing signed-distance shapes and
    text at 3840 × 2160, 60 fps. The same kit draws the in-game menus, so the launcher and the menus
    finally share one look and one codebase ([section 9](#9-architecture-and-code-plan)).
@@ -61,8 +61,13 @@ Five changes do most of the work:
 5. **Nothing lost.** [Appendix A](#appendix-a-feature-parity) maps every feature of today's launcher
    and in-game menus to its place in the new design. The current launcher stays in the build as
    "classic" until the new one has shipped and settled.
+6. **The emulators come first.** The UI must not cost a game anything: nothing of the launcher
+   survives into a game, nothing new runs while the in-game menu is closed, and the menu's cost while
+   open is capped and measured. Every phase ships only after an A/B run against 3.0.0 shows no
+   difference ([4.2](#42-the-performance-contract)).
 
-Rough size: 12 to 16 weeks of focused work in five phases, each one shippable on its own
+Rough size: 12 to 16 weeks of focused work in five phases, each one shippable on its own and each
+checked against the performance contract
 ([section 10](#10-delivery-plan)).
 
 ---
@@ -116,7 +121,7 @@ The current UI is careful, and much of that care carries over unchanged:
 - **L1 and R1 for tabs**, Circle always one step back, a second confirmation for destructive actions.
 - **Original music and menu sounds**, synthesised by `tools/render-sounds.py`.
 - **A PC preview harness** (`tools/preview-launcher.sh`) that renders every screen to PNG from an input
-  script. This proposal leans on it heavily.
+  script. This design leans on it heavily.
 
 ### 2.3 Where it falls short
 
@@ -278,12 +283,15 @@ on the home screen). The principles below are those traits made into rules.
 
 ---
 
-## 4. Principles
+## 4. Principles and the performance contract
+
+### 4.1 Principles
 
 Each principle has a test a screen must pass before it ships.
 
 | # | Principle | The test |
 |---|---|---|
+| P0 | **The emulators come first.** No part of the UI may cost a game frame rate, smoothness, memory or launch time (4.2). | The A/B run in 4.2 passes. |
 | P1 | **Games first; the other side one press away.** Each side's Home and Library are its games, art first. | Switching sides is one press from Home or the Library; no screen asks "Wii U or 3DS?" except the first start, or with *Ask each time* on. |
 | P2 | **One focus, always found.** Exactly one thing is focused, lifted, ringed and lit. | A new player finds the focus within a second on any screen, in high contrast mode too. |
 | P3 | **Nothing teleports.** Focus glides, screens assemble, content cross-fades. | Every change of focus, screen or value has a motion; Reduce motion turns each into a short fade. |
@@ -295,6 +303,78 @@ Each principle has a test a screen must pass before it ships.
 | P9 | **Respect the game.** The in-game menu covers only what it must and pauses where the emulator can. | The game stays visible behind every in-game screen. |
 | P10 | **Fewer, better words.** The current voice: short, plain, specific. | Every row's one-line description fits on one line at 26 px. |
 | P11 | **Accessible by default.** Larger text, high contrast, reduce motion; hold-to-confirm instead of double presses. | Every screen passes the checklist in all three accessibility modes. |
+
+### 4.2 The performance contract
+
+The emulators come first. Every part of this design answers to one rule: **playing a game with the new
+UI must be indistinguishable from playing it with 3.0.0's.** When a feature cannot meet that, the
+feature changes, not the rule. "Performance" here means a game's frame rate and frame pacing, stutter,
+the CPU and GPU memory the emulator has, the time from Cross to the game running, and the time back
+to the library.
+
+**Before a game, the launcher leaves nothing behind.**
+
+1. Everything the launcher made is gone before the emulator's renderer starts: the kit's swapchain,
+   surface, Vulkan device and instance; every worker thread (cover, boot screen and screenshot
+   downloads and decodes, ambient colours, glyph rasterising, catalogue writes), joined, not detached;
+   its audio (AudioOut closed, as `ps5sound::Stop` does today); its sockets and timers. Today's
+   teardown (`StopBackgroundWork`, `ps5sound::Stop` and `ps5ui::Stop`,
+   `port/frontend/launcher.cpp:3558` and `:3684`) is the model; the kit's device and threads join it.
+2. The catalogue and every cache are written before that teardown, never once the game is starting.
+3. RADV is linked into the app, so the launcher's device and the emulator's share one driver in one
+   process. Whatever the driver keeps between devices (its shader disk cache, compiler threads, buffer
+   caches) is checked once in Phase 0; whatever the launcher's use of it would leave behind is turned
+   off for the launcher's device.
+4. Launch time (Cross to the game's first frame) and the memory the game starts with (its first
+   `[memory]` line, `port/app/emulator.cpp:554`) are no worse than 3.0.0's.
+
+**During a game, with the menu closed, nothing new runs.**
+
+5. Per frame, the app does what 3.0.0 does and no more: on the Wii U, Cemu's ImGui input hook
+   (`PS5Cemu_ImGuiInput`, `port/app/ingame.cpp:553`) and the touchpad cursor (`PS5Cemu_RenderOverlay`,
+   `:667`); on the 3DS, the overlay hook, which returns at once while no menu, keyboard, performance
+   overlay or border is up (`port/app/ingame3ds.cpp:911`). The kit adds no per-frame work, lock,
+   allocation, upload or draw while nothing of it is on screen.
+6. The only per-frame drawing a player can choose is today's: the 3DS border (one textured quad) and
+   the performance overlays.
+7. No UI feature samples the game while it runs. Play time is the difference between the launch and
+   the return, written by the launcher. The last session's frame rate is read by the launcher, after
+   the restart, from the `[perf]` and `[perf3ds]` lines the boot log already gets every 10 seconds
+   (`port/app/emulator.cpp:591`, `port/azahar/core.cpp:776`). The light bar is set once, at launch.
+   Rumble never comes from the UI in a game. Toasts appear only in answer to a menu action.
+8. The companion page (Phase 4), if it is built, stops before a game and starts again in the launcher:
+   unlike PS5SX2's, its settings change between games, not during them.
+
+**During a game, with the menu open, the cost is bounded.**
+
+9. The 3DS pauses while its menu is open, as it does today, so the menu costs that game nothing. The
+   Wii U keeps running behind it (README, Known issues): there the menu may take at most 0.5 ms of GPU
+   time and 0.3 ms of the render thread per frame at 4K, measured, and the game's frame rate with the
+   menu open stays within the A/B threshold below.
+10. Opening the menu creates nothing: its pipeline, font atlas and the game's cover are made while the
+    game loads, before its first frame, not on the first open (today the cover is uploaded then).
+11. No glass in a game: a blur would need a copy of the game's frame. The menu's panels are `ink-1` at
+    92 % over one dimming quad. The game's picture is not moved or scaled behind the menu: that would
+    change how Cemu and Azahar present their frames.
+12. Pictures of the game (save-state thumbnails, the 3DS screenshot used as its backdrop, 7.4) are
+    taken only while the 3DS is paused: one copy of the top screen, downscaled on the GPU in the paused
+    frame and held in memory; it is written to disk on the way back to the library. The Wii U takes
+    none; its backdrop is its boot screen.
+
+**How it is checked.** Every phase from 1 on ends with an A/B run, and a phase whose run fails does
+not ship.
+
+| | |
+|---|---|
+| Builds | 3.0.0 against the new UI, same console, same firmware, same settings |
+| Games | A CPU-heavy Wii U game (a town in Breath of the Wild), a GPU-heavy one (Xenoblade Chronicles X), and a 3DS game at 6× (Luigi's Mansion: Dark Moon); the same save and the same spot each run |
+| Runs | Three of 10 minutes per game and build; on the Wii U, also 2 minutes with the menu open |
+| Metrics | Average frame rate (`[perf]`, `[perf3ds]`); frame-time 99th percentile and worst frame; memory at game start (`[memory]`); Cross to first frame; *Quit to the library* to the launcher's first frame |
+| Pass | Every metric within the spread of two runs of the same build (measured first), or 1 %, whichever is larger |
+
+The frame-time percentiles need one addition to the emulators' present paths: a fixed-size histogram
+of frame times, one increment per frame, logged with the `[perf]` lines. It sits behind a
+`ps5cemu.json` switch, off by default, so normal play pays one untaken branch per frame.
 
 ---
 
@@ -428,7 +508,9 @@ the touchpad stays the shortcut key, as now (click + Options, L1, R1).
   of the last session from the `[perf]` lines the app already logs), Updates and DLC. Each opens its
   page; a card with nothing to say is left out. The cards read the catalogue's saved summary (5.5), so
   they show at once, before the side's scan finishes.
-- **The backdrop** takes the focused cover's two ambient colours (7.4), eased over 600 ms.
+- **The backdrop** is the focused game's own picture (7.4): on the Wii U side its boot screen, as the
+  hero art right of the title; on the 3DS side its screenshot. It cross-fades over 600 ms as the
+  focus moves.
 - **States:** first start opens the Setup check instead; no games shows a single card, "Your games go
   here", with *Choose a folder* focused; a launch error from the last session shows as a card above
   the row with the reason and *Try without graphic packs* or *Try without cheats* where those were on.
@@ -463,8 +545,8 @@ the touchpad stays the shortcut key, as now (click + Options, L1, R1).
 **Purpose:** everything about one game, and its settings, in one place. Replaces *Details*
 ([today's](ui-redesign/current/details.png)).
 
-- The cover large, with the backdrop in its colours; the neighbouring games peek at the screen's
-  edges, with L1 and R1 named at the top.
+- The cover large, over the game's boot screen or screenshot, softened and dimmed so the cover leads
+  (7.4); the neighbouring games peek at the screen's edges, with L1 and R1 named at the top.
 - Kicker: system badge, GameTDB ID, region, title ID. Title. Chips: status, version or update, DLC,
   format, play time.
 - **Actions:** *Play*, *Graphic packs* (Wii U, with the count on), *Game settings*, *…*.
@@ -479,8 +561,9 @@ The PS5 puts a game's secondary actions behind Options; so does this. It opens a
 to the focused cover, from Home, the Library or the hub:
 
 *Play* · *Game hub* · *Graphic packs* (Wii U) · *Game settings* · *Start without graphic packs* (Wii U,
-when some are on) · *Start without cheats* (3DS, when some are on) · *Look for its box art again* ·
-*Show where it is* (the path, and the drive).
+when some are on) · *Start without cheats* (3DS, when some are on) · *Keep this picture* (3DS: pins
+the current backdrop, 7.4) · *Look for its box art again* · *Show where it is* (the path, and the
+drive).
 
 ### 6.5 Settings
 
@@ -584,8 +667,9 @@ The new one:
 
 **Purpose:** change what you need without leaving the game, then get back to it.
 
-- **Opening:** touchpad click + Options, as now. The game's picture eases back (scale 94 %, rounded
-  corners) and dims more on the left than on the right, so it stays readable behind the sheet.
+- **Opening:** touchpad click + Options, as now. The game's picture stays where it is and is dimmed
+  by one quad, more on the left than on the right, so it stays readable behind the sheet (4.2, rule
+  11: no glass, no scaling in a game).
 - **The sheet's head:** the cover, name, system badge, and *Paused* when the emulator pauses (the
   3DS does today). For the Wii U, which keeps running (README, Known issues), the badge reads
   *Running* until Cemu can be paused; whether `CafeSystem` offers a safe pause is an open question
@@ -595,7 +679,8 @@ The new one:
   shapes (a disk, an arrow into a tray), which Delta's critique asked for.
 - **Save states get pictures:** a strip of the five slots with a thumbnail of the moment each was
   saved, when it was saved, and the empty ones. Saving to an empty slot is instant; replacing one or
-  loading is **held** (a ring fills over 600 ms) instead of pressed twice.
+  loading is **held** (a ring fills over 600 ms) instead of pressed twice. The thumbnails are taken
+  while the game is paused (4.2, rule 12).
 - **The list:** the categories of today's menus (Screens and border, Graphics, Speed, Graphic packs,
   USB devices, Cheats, Amiibo, Controls), each showing its current value so most visits need no
   opening; Volume is a slider in place; *Quit to the library* at the bottom, held to confirm.
@@ -658,20 +743,77 @@ never overflows: it wraps to its line limit, then ends in an ellipsis at a word 
   Backdrops bleed to the edge.
 - **Radii:** chips 12, cards and tiles 20 (covers 14), sheets 28, buttons fully round.
 - **Three layers:** a backdrop that moves slowly; content; overlays on frosted glass (the scene
-  blurred into a 480 × 270 target, as ps5-homebrew-ui does, then tinted and edged).
+  blurred into a 480 × 270 target, as ps5-homebrew-ui does, then tinted and edged). Glass is the
+  launcher's only: in a game, panels are opaque (4.2, rule 11).
 - **Shadows** float only what is focused or modal: the focused cover's shadow drops 26 px with a 60 px
   softness and its own colour as a glow.
 
-### 7.4 Covers and the backdrop
+### 7.4 Covers, boot screens, screenshots and the backdrop
 
 - **Covers** come from GameTDB as today. The catalogue stores their natural aspect, so the shelf lays
   them out without decoding them.
-- **Ambient colours:** when a cover arrives, a worker downsamples it to 32 × 32 and picks two colours
-  (the most frequent saturated one, and a dark companion) with a small median cut. Both are kept in
-  `library.json`. Their luminance is clamped so white text over them keeps at least 4.5:1 contrast.
-- **The backdrop** is two radial gradients in those colours over `ink-0`, a film grain at 11 %, a
-  vignette, and the system motif (bubbles or waves, from `bubbles.cpp` and `wave.cpp`'s parameters,
-  as a shader). It cross-fades over 600 ms as the focus moves; Reduce motion stops the motif.
+- **The backdrop is the focused game's own picture**, so moving the focus changes the whole screen,
+  as the PS5's game hubs do with their key art.
+
+**Wii U: the boot screen.** Every Wii U title carries the picture the console shows while it loads,
+`meta/bootTvTex.tga` (1280 × 720, the TV's; `bootDrcTex.tga`, 854 × 480, is the GamePad's). The launcher
+reads it the way `port/app/covers.cpp` reads `meta/iconTex.tga` (mounting the title through Cemu's
+title list, `.gz` included), which works because Cemu's core is up whenever the Wii U side is open
+(5.5). `DecodeTga`'s 1024-pixel limit grows to 1280. Each boot screen is read once, in the
+background, and kept as `/data/ps5cemu/covers/boot/<title ID>.png`.
+
+**3DS: a screenshot.** 3DS games have no boot screen (their SMDH holds only 24- and 48-pixel icons),
+so the picture is a screenshot, the first of these that exists:
+
+1. **The player's own.** While a 3DS game is paused (its menu open, or *Quit to the library*), the app
+   copies its top screen at the internal resolution (2400 × 1440 at 6×), downscaled on the GPU to
+   1280 × 768, and writes it to `/data/ps5cemu/azahar/screenshots/<title ID>.png` on the way back to
+   the library (4.2, rule 12). The game's own frame is copied, not the menu over it, so the picture is
+   the moment you left. *Keep this picture* in the Game menu pins one, so later sessions don't
+   replace it.
+2. **libretro's snap.** The libretro-thumbnails project's 3DS set has a `Named_Snaps` folder: 2,009
+   pictures when checked, PNGs of 512 × 614 with both screens stacked, about 450 KB each, named by the
+   game's No-Intro name. A game is matched through its product code: the GameTDB ID the app already
+   has (`BZLE` for A Link Between Worlds, USA) is the code's last four characters (`CTR-P-BZLE`), and
+   libretro-database's No-Intro 3DS file pairs codes with names (2,076 games). A build step writes that
+   pairing into a small table beside `port/app/gametdb/3ds.tsv.gz`, with the characters libretro
+   replaces in file names (`` &*/:`<>?\| ``) swapped for `_`. The snap is downloaded once, through
+   the box art's queue, and only its top screen (the upper 512 × 307) is kept, in
+   `/data/ps5cemu/covers/snaps/<GameTDB ID>.png`.
+3. **libretro's title screen** (`Named_Titles`, 1,967), the same way, when there is no snap.
+4. **None:** the cover's ambient colours, as below.
+
+Settings > General > Online and updates has *3DS screenshots from libretro* beside *Box art from
+GameTDB*: on by default like it, and off means nothing more is asked for. Nothing is bundled; like the
+covers, every picture is fetched at run time or taken from the player's own games.
+
+**How the picture is shown** (the mockups show each case):
+
+- **Home, Wii U side:** the boot screen is the hero art. It is drawn at its own size (1280 × 720 at
+  1.5×: 1920 × 1080 on the layout), moved 21 % right and 14 % down, so a centred logo lands right of
+  the game's title and below the row; the top and left edges it uncovers fade into the ambient colour.
+  A left-to-right scrim and a top and bottom one keep every word at 4.5:1 contrast or better.
+- **Home, 3DS side; the Library; the Game hub:** the picture is atmosphere: full-bleed, softened by a
+  light blur and dimmed, so the title, the shelf or the cover leads. A 3DS picture is never scaled up
+  sharp: a 512 × 307 snap is softened more than a 1280 × 768 capture.
+- **The side's motif** (bubbles or waves, from `bubbles.cpp` and `wave.cpp`'s parameters, as a shader)
+  sits faintly over it, with a film grain at 11 % and a vignette.
+- **Changes** cross-fade over 600 ms as the focus moves, and only once the focus has rested for 150 ms,
+  so scrolling through a row doesn't flicker; Reduce motion makes it a 150 ms fade and stops the motif;
+  High contrast dims the picture further; Settings > General > Display > *Game pictures behind menus*
+  turns them off.
+- **Ambient colours:** when a picture or cover arrives, a worker downsamples it to 32 × 32 and picks two
+  colours (the most frequent saturated one, and a dark companion) with a small median cut, from the
+  picture when there is one, else the cover. Both are kept in `library.json`; their luminance is
+  clamped so white text over them keeps at least 4.5:1 contrast. They tint the scrims and fill
+  whatever the picture leaves uncovered.
+
+**What it costs, and when.** Only in the launcher: boot screens are read while the Wii U side is open,
+snaps download through `ps5boxart`'s queue, and both stop with it before a game (`ps5boxart::Stop`,
+4.2, rule 1). Decoding happens on a worker; the screen holds the focused game's picture and the next
+one along, about 3.7 MB of GPU memory each at 1280 × 720, released before a game with the rest of the
+kit. On disk, a boot screen is about 1 MB as a PNG and a cropped snap about 150 KB.
+
 - **Icons and glyphs** are drawn as shapes (the controller glyphs already are, in `menu_canvas.h`), so
   they tint and scale with no atlases.
 
@@ -737,9 +879,10 @@ the current five.
 
 - **Rumble** (through `ps5pad::SetVibration`): a light 50 ms pulse for a refusal (Cross on something
   unavailable, the edge of a list once), a stronger 120 ms one for a launch and a completed hold.
-  Never on ordinary navigation. Off when Settings > Controllers > Vibration is off.
-- **The light bar** (`ps5pad::SetLightBar`): the focused game's system colour in the launcher; in a
-  game, as the game sets it.
+  Never on ordinary navigation, and never from the UI in a game. Off when Settings > Controllers >
+  Vibration is off.
+- **The light bar** (`ps5pad::SetLightBar`): the side's colour in the launcher, set once at launch for
+  the game; in a game, as the game sets it.
 
 ---
 
@@ -750,7 +893,7 @@ the current five.
 The design needs 4K text, springs at 60 fps, blur behind sheets, and one toolkit for the launcher and
 the in-game menus. Four ways to get there:
 
-| | RmlUi + SDL software (today) | ps5-opengl (ProsperoEden, ps5-homebrew-ui) | **Vulkan on RADV (proposed)** | Dear ImGui everywhere (PCSX2, DuckStation) |
+| | RmlUi + SDL software (today) | ps5-opengl (ProsperoEden, ps5-homebrew-ui) | **Vulkan on RADV (chosen)** | Dear ImGui everywhere (PCSX2, DuckStation) |
 |---|---|---|---|---|
 | 4K, 60 fps with motion | No: 1080p, CPU-bound fills | Yes, measured | Yes: the driver Cemu and Azahar already render 4K games with | Yes |
 | Blur, shadows, SDF text | No | Yes | Yes (own shaders) | Partly (no blur; text from a bitmap atlas) |
@@ -759,7 +902,7 @@ the in-game menus. Four ways to get there:
 | Shared with the in-game menus | No | No: the games render with Vulkan | **Yes**: the same batch recorded into Cemu's and Azahar's frames | Yes |
 | Known risk | — | Two drivers owning the GPU in one process | The 2026-10-02 attempt drew nothing (9.4) | Looks like a tool unless heavily customised |
 
-**Proposed:** a small Vulkan renderer of our own, in the style ps5-homebrew-ui proved on the
+**Chosen:** a small Vulkan renderer of our own, in the style ps5-homebrew-ui proved on the
 console: one instanced pipeline whose fragment shader evaluates a signed distance for each quad
 (rounded rectangle, ring, shadow, glow, image, glyph), a blur pass for glass, and nothing else. It
 runs on the RADV build the app links, it shares one kit with the in-game menus (which already draw
@@ -802,7 +945,9 @@ port/frontend/
 └── classic/                     today's launcher.cpp, ui_host.cpp, bubbles, wave, until removed
 port/app/
 ├── catalog.{h,cpp}              each side's cached game list (5.5), library.json
-├── ambient.{h,cpp}              two colours per cover (7.4)
+├── ambient.{h,cpp}              two colours per picture or cover (7.4)
+├── backdrops.{h,cpp}            boot screens, snaps, the player's captures: found, cached, decoded (7.4)
+├── gametdb/3ds-snaps.tsv.gz     product code to libretro name, from libretro-database (7.4)
 └── ingame/quick_menu.{h,cpp}    the Quick Menu's model and drawing; ingame.cpp and ingame3ds.cpp
                                  keep their emulator hooks and supply its rows
 ```
@@ -927,6 +1072,9 @@ display.
   shortcuts, the touchpad cursor, the GamePad and 3DS screen arrangement, and the hand-off of changes
   to the game's thread. Only the drawing and the input handling of `side_menu.h` and `menu_canvas.h`
   are replaced.
+- **What it may cost:** nothing while the menu is closed, and at most 0.5 ms of GPU and 0.3 ms of the
+  render thread while it is open over a running Wii U game; its pipeline, atlas and cover are made
+  while the game loads (4.2, rules 5 to 12).
 
 ### 9.6 Text
 
@@ -957,7 +1105,12 @@ display.
 | `port/app/side_menu.h`, `menu_canvas.h` (455) | Replaced by the kit's widgets and `app/ingame/quick_menu.cpp` |
 | `port/app/ingame.cpp` (690), `ingame3ds.cpp` (1,012) | Keep their hooks and content; drawing and keyboard move to the kit (9.5) |
 | `port/main_ps5.cpp` (241) | The side choice moves into the shell's switch; `prepare` is unchanged (Cemu's core or Azahar's scan, per side) |
-| `port/app/boxart.cpp`, `covers.cpp`, `gameinfo.cpp`, `compatibility.cpp`, `port/azahar/library.cpp` | Unchanged; box art arrivals also trigger the ambient colours |
+| `port/app/covers.cpp` (168) | `DecodeTga` takes 1280-pixel images; a `ReadBootScreen` beside `ReadIcon` reads `meta/bootTvTex.tga` (7.4) |
+| `port/app/boxart.cpp` (430) | Its queue also downloads libretro snaps and title screens, and stops them with the covers (7.4) |
+| `port/app/ingame3ds.cpp` | Also copies the top screen while the game is paused, for the backdrop and the save-state thumbnails (4.2, rule 12) |
+| `port/app/emulator.cpp`, `port/azahar/core.cpp` | An optional frame-time histogram logged with `[perf]` / `[perf3ds]`, off by default (4.2) |
+| `tools/render-gametdb.py` | Also writes `3ds-snaps.tsv.gz` from libretro-database's No-Intro 3DS file |
+| `port/app/gameinfo.cpp`, `compatibility.cpp`, `port/azahar/library.cpp` | Unchanged; arrivals also trigger the ambient colours |
 | `port/CMakeLists.txt` | New sources; a step compiling the UI's shaders to SPIR-V with the pinned glslang |
 | `patches/cemu` | One more patch: Cemu's shader-cache loading screen drawn by the kit (6.8) |
 
@@ -976,6 +1129,10 @@ of launcher, host, layout script and stylesheet); the Quick Menu about 1,500 (re
   `ui.reduceMotion`, `ui.holdMs`, `ui.startOn` (`last` or `ask`), `ui.libraryFilter` and
   `ui.librarySort` (per side), and `ui.classic` (the fallback switch).
 - `library.json` holds the catalogue (5.5); deleting it only costs one full scan of each side.
+- **New caches:** `covers/boot/` (Wii U boot screens), `covers/snaps/` (libretro snaps and title
+  screens), `azahar/screenshots/` (the player's captures, and which are kept). **New keys:**
+  `snapDownloads` (Settings > Online and updates), `ui.gamePictures` (Settings > Display), and
+  `perfHistogram` (the A/B runs' frame-time histogram, off by default).
 
 ### 9.9 Testing
 
@@ -989,6 +1146,8 @@ of launcher, host, layout script and stylesheet); the Quick Menu about 1,500 (re
   draws=… instances=…` to the boot log every 600 frames, as ps5-homebrew-ui does; Phase 0 to 3's exit
   criteria are read from it.
 - **The craft checklist** (ps5-homebrew-ui's, adapted in section 4) for every screen before it ships.
+- **The A/B run** (4.2) at the end of every phase from 1 on: three games, three runs each, against
+  3.0.0. A phase whose run fails does not ship.
 
 ---
 
@@ -1000,10 +1159,10 @@ held while the app starts, as RetroArch PS5 does for its pre-screen).
 | Phase | What | Exit criteria | Size |
 |---|---|---|---|
 | **0. Foundations** | `ui/gfx` on VideoOut (9.4), the SDF batch, text, springs, input, feedback; the preview harness on lavapipe; a gallery screen showing every widget | Gallery at 4K, 60 fps on a PS5 and a PS5 Pro (tour log: p99 under 17 ms, max under 21 ms); first frame within 1.5 s of the launcher opening; twenty clean hand-overs of VideoOut to each emulator | 2–3 weeks |
-| **1. The shell, at parity** | The catalogue (5.5) and the side switch (5.3); Home, Library, Game hub, Game menu, Settings with every current setting and page, the launch screen, the update sheet | Every launcher row of Appendix A ticked; a snapshot for every screen; launch times no slower than 3.0.0's | 4–5 weeks |
-| **2. In a game** | The Quick Menu on the kit for both systems; one keyboard; hold to confirm; save-state thumbnails; toasts; Cemu's shader-cache screen | Every in-game row of Appendix A ticked; the menu at 60 fps over a 4K game without lowering the game's own frame rate measurably | 2–3 weeks |
-| **3. The rest of the design** | Setup check; game settings; search, sort and filters; accessibility switches; frame-rate stats; light bar and rumble; touchpad zones and reserved buttons in mapping | The principles' tests (section 4) pass on every screen | 2–3 weeks |
-| **4. Reach** | The PS5's system language and a string table; an opt-in companion page by QR for long text and game settings (LAN only, off by default, as PS5SX2 and RetroArch PS5 do it); classic removed after a release with no fallback reports | — | Open |
+| **1. The shell, at parity** | The catalogue (5.5) and the side switch (5.3); Home, Library, Game hub, Game menu, Settings with every current setting and page, the launch screen, the update sheet; Wii U boot screens as backdrops | Every launcher row of Appendix A ticked; a snapshot for every screen; the A/B run passes (4.2): launch and return no slower, memory at game start no lower, frame rates unchanged | 4–5 weeks |
+| **2. In a game** | The Quick Menu on the kit for both systems; one keyboard; hold to confirm; save-state thumbnails and the 3DS captures, taken while paused; toasts; Cemu's shader-cache screen | Every in-game row of Appendix A ticked; the A/B run passes, including the Wii U with the menu open; the menu within 0.5 ms GPU and 0.3 ms CPU per frame at 4K | 2–3 weeks |
+| **3. The rest of the design** | Setup check; game settings; search, sort and filters; accessibility switches; frame-rate stats; light bar and rumble; touchpad zones and reserved buttons in mapping; libretro snaps and title screens for the 3DS | The principles' tests (section 4) pass on every screen; the A/B run passes | 2–3 weeks |
+| **4. Reach** | The PS5's system language and a string table; an opt-in companion page by QR for long text and game settings (LAN only, off by default, stopped during games: 4.2, rule 8); classic removed after a release with no fallback reports | The A/B run passes | Open |
 
 Altogether 12 to 16 weeks for Phases 0 to 3.
 
@@ -1020,7 +1179,10 @@ Altogether 12 to 16 weeks for Phases 0 to 3.
 | System fonts differ between firmwares | Low | A script falls back to boxes | Probe the known paths at start; log what was found; Settings > About says which fonts are in use |
 | The in-game kit costs the game frames | Low | Menus stutter the game | The batch is a few dozen draws; measure in Phase 2; the ImGui path remains for one release |
 | Scope grows | High | The release slips | The phases are each shippable; Phase 4 is optional by design |
-| Artwork rights | — | — | No Nintendo logos or box art are bundled; covers keep coming from GameTDB at run time; the mockups use drawn stand-ins |
+| Something of the launcher slows a game | Low | The one thing the design may not do | The contract (4.2): teardown checked by the boot log, the A/B run at every phase, the classic launcher as the fallback until it passes |
+| The driver keeps state between the launcher's device and the emulator's | Medium | Memory or a cache the emulator could have used | Checked in Phase 0 (4.2, rule 3); anything that persists is turned off for the launcher's device |
+| A boot screen or snap is missing or wrong | Medium | A game shows another's picture, or none | Matching by product code, not name; the player's own capture wins; *Keep this picture*; the ambient colours otherwise |
+| Artwork rights | — | — | No Nintendo logos, box art, boot screens or screenshots are bundled; covers and snaps are fetched at run time, boot screens read from the player's own games; the mockups use drawn stand-ins |
 
 ---
 
@@ -1038,6 +1200,8 @@ Altogether 12 to 16 weeks for Phases 0 to 3.
    setup theme on the other), or keep one choice for both?
 6. **Profiles** (ProsperoEden has eight): wanted for shared consoles, or out of scope?
 7. **The companion page:** is a LAN web service acceptable to the project, given HEN setups vary?
+8. **The GamePad's boot screen:** should a game shown with the GamePad as its main screen use
+   `bootDrcTex.tga` instead of the TV's?
 
 ---
 
@@ -1170,6 +1334,23 @@ Every feature of today's UI, where it is now, and where it goes. ✓ means uncha
 | Back to the library, Cross twice | *Quit to the library*, held **+** |
 | The port's 3DS keyboard (labels from the game, validation) | The kit's keyboard, same behaviour ✓ |
 
+### New in this design
+
+| Feature | Where |
+|---|---|
+| The side switch: *Wii U \| 3DS* in the bar, a touchpad click, *Start on* | 5.3 |
+| The focused game's boot screen (Wii U) or screenshot (3DS) as the backdrop | 7.4 |
+| The 3DS player's own captures, taken while paused; *Keep this picture* | 7.4, 6.4 |
+| libretro snaps and title screens for 3DS games, by product code | 7.4 |
+| The performance contract and the A/B run at every phase | 4.2 |
+| A frame-time histogram in the `[perf]` lines, off by default | 4.2 |
+| The Game menu on Options; *Start without graphic packs / cheats* | 6.4 |
+| Game settings, inheriting *Default* | 6.5 |
+| Search, sort, *Recently added* and *Favourites* in the Library | 6.2 |
+| The Setup check | 6.7 |
+| Larger text, high contrast, reduce motion, hold to confirm | 7.6 |
+| One on-screen keyboard for both games and Search; toasts | 6.9 |
+
 ---
 
 ## Appendix B: voice and copy
@@ -1193,6 +1374,12 @@ The current copy is one of the app's strengths; the new screens keep its rules.
 ## Appendix C: sources
 
 Read in full (GitHub, and this repository):
+
+- libretro, [libretro-thumbnails: Nintendo 3DS](https://github.com/libretro-thumbnails/Nintendo_-_Nintendo_3DS):
+  the folders and their counts (2,148 box arts, 2,009 snaps, 1,967 title screens on 2026-10-06), and a
+  snap's format (512 × 614, both screens stacked)
+- libretro, [libretro-database's No-Intro 3DS file](https://github.com/libretro/libretro-database/blob/master/metadat/no-intro/Nintendo%20-%20Nintendo%203DS.dat):
+  2,076 games, each with its product code (`serial`)
 
 - BlackBearReloaded, [ps5-homebrew-ui](https://github.com/blackbearreloaded/ps5-homebrew-ui):
   [README](https://github.com/blackbearreloaded/ps5-homebrew-ui/blob/main/README.md),
