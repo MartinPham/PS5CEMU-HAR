@@ -369,7 +369,7 @@ not ship.
 | Builds | 3.0.0 against the new UI, same console, same firmware, same settings |
 | Games | A CPU-heavy Wii U game (a town in Breath of the Wild), a GPU-heavy one (Xenoblade Chronicles X), and a 3DS game at 6× (Luigi's Mansion: Dark Moon); the same save and the same spot each run |
 | Runs | Three of 10 minutes per game and build; on the Wii U, also 2 minutes with the menu open |
-| Metrics | Average frame rate (`[perf]`, `[perf3ds]`); frame-time 99th percentile and worst frame; memory at game start (`[memory]`); Cross to first frame; *Quit to the library* to the launcher's first frame |
+| Metrics | Average frame rate (`[perf]`, `[perf3ds]`); frame-time 99th percentile and worst frame; the driver's submission timings (its `[driver]` lines, `ps5log::ForwardDriverMessages`); memory at game start (`[memory]`); Cross to first frame; *Quit to the library* to the launcher's first frame |
 | Pass | Every metric within the spread of two runs of the same build (measured first), or 1 %, whichever is larger |
 
 The frame-time percentiles need one addition to the emulators' present paths: a fixed-size histogram
@@ -1202,6 +1202,10 @@ Altogether 12 to 16 weeks for Phases 0 to 3.
 7. **The companion page:** is a LAN web service acceptable to the project, given HEN setups vary?
 8. **The GamePad's boot screen:** should a game shown with the GamePad as its main screen use
    `bootDrcTex.tga` instead of the TV's?
+9. **ReShade presets:** the runtime from the driver work (`port/cemu/ReShadeRuntime`, not called yet)
+   will need a place: a preset per game under Wii U > Graphics and Game settings, and the in-game
+   Graphics category, within the contract's per-frame limits (its passes are the player's choice,
+   like the performance overlays).
 
 ---
 
@@ -1262,7 +1266,7 @@ Every feature of today's UI, where it is now, and where it goes. ✓ means uncha
 
 | Today (category > row) | In the new UI |
 |---|---|
-| Video (Wii U) > Upscaling to 4K, 120 Hz output, Performance overlay, Async shader compile | Wii U > Graphics (upscaling with a sample preview, async shaders); General > Display: 120 Hz output (badged Wii U while only Cemu uses it) and the performance overlay (one switch for both systems, today one each) |
+| Video (Wii U) > Upscaling to 4K, 120 Hz output, Frame pacing, Performance overlay, Async shader compile | Wii U > Graphics (upscaling with a sample preview, frame pacing, async shaders); General > Display: 120 Hz output (badged Wii U while only Cemu uses it) and the performance overlay (one switch for both systems, today one each) |
 | Video (3DS) > Internal resolution, Screen layout, Texture filter, Custom textures | 3DS > Graphics (resolution stepper, texture filter, custom textures); 3DS > Screens and borders (layout pictograms) |
 | Audio > Game volume, Launcher music, Music volume, Menu sounds | General > Sound ✓ (one game volume for both, today one per system, overridable per game) |
 | Audio (Wii U) > GamePad speaker | General > Sound, as a row badged Wii U ✓ |
@@ -1278,7 +1282,7 @@ Every feature of today's UI, where it is now, and where it goes. ✓ means uncha
 | Installs > Install a CIA file (3DS) with inspect, progress, cancel | 3DS > Install CIA files ✓ |
 | Online > Box art from GameTDB, Community graphic packs, PS5CEMU-HAR updates | General > Online and updates ✓ |
 | Diagnostics > Copy logs to USB, Clear shader caches (the side's), version, firmware, HEN / JIT, logs path, session | Help > Diagnostics ✓: Clear Wii U shader caches and Clear 3DS shader caches as two rows, held to confirm; cards with status **+**; Help > Setup check **+** |
-| Settings only in `ps5cemu.json` (`radvDebug`, `pinCpuThreads`) | ✓, still only there |
+| Settings only in `ps5cemu.json` (`radvDebug`, `radvEnvironment`, `pinCpuThreads`) | ✓, still only there |
 | About > credits, paths, version | Help > About ✓ |
 | Triangle: a setting's longer help | ✓ |
 | Rows dimmed when unavailable (no DualSense, no Cemu, no Artic setup) | ✓, and say why when focused **+** |
@@ -1309,7 +1313,7 @@ Every feature of today's UI, where it is now, and where it goes. ✓ means uncha
 | Menu head: box art, name, publisher, year | ✓, plus Running / Paused and play time **+** |
 | Back to the game | *Resume* ✓ |
 | Screens: main screen, the other in a corner, picture shape | ✓ (quick action *Screens*, and the category) |
-| Graphics: upscaling, accurate barriers, async shaders, overlay | ✓ |
+| Graphics: upscaling, accurate barriers, async shaders, frame pacing, overlay | ✓ |
 | Graphic packs while running, presets, "next start" marks | ✓ |
 | USB devices: figures on slots, Empty | ✓ |
 | Volume | ✓ (a slider in place) |
@@ -1393,6 +1397,8 @@ Read in full (GitHub, and this repository):
 - PCSX2, [`pcsx2/ImGui/FullscreenUI.cpp` and `ImGuiFullscreen.h`](https://github.com/PCSX2/pcsx2/tree/master/pcsx2/ImGui)
 - This repository's [issues](https://github.com/premohq/PS5CEMU-HAR/issues) #3 to #24, its code, and
   its launcher preview tool (the "today" screenshots)
+- This repository's [docs/DRIVER-PERFORMANCE.md](DRIVER-PERFORMANCE.md): the driver at `7b59ef27`, frame
+  pacing, and the driver's timings the A/B run reads
 
 Through search results and summaries (the pages themselves were not reachable from the research
 environment, so quotes are as the search returned them):
