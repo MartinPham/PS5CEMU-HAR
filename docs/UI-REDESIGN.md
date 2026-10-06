@@ -42,7 +42,8 @@ Six decisions do most of the work:
 1. **Two sides, one app.** With the Wii U side picked, Home and the Library show only Wii U games; with
    the 3DS side picked, only 3DS games. The sides become two states of one shell: one design, one
    codebase, one Settings. A switch at the top left (or one click of the touchpad) moves between
-   them, the app remembers the side, and the start screen stays as an option. Behind the focused game
+   them, and the app remembers the side: it starts on a side's Home, never on a screen asking which
+   (the start screen stays only as an opt-in setting). Behind the focused game
    is its own picture: a Wii U game's boot screen, a 3DS game's screenshot
    ([section 5](#5-cemu-and-azahar-two-sides-of-one-app), [7.4](#74-covers-boot-screens-screenshots-and-the-backdrop)).
 2. **The launcher moves to the GPU.** Today it is drawn by SDL's software renderer at 1080p, which
@@ -293,7 +294,7 @@ Each principle has a test a screen must pass before it ships.
 | # | Principle | The test |
 |---|---|---|
 | P0 | **The emulators come first.** No part of the UI may cost a game frame rate, smoothness, memory or launch time (4.2). | The A/B run in 4.2 passes. |
-| P1 | **Games first; the other side one press away.** Each side's Home and Library are its games, art first. | Switching sides is one press from Home or the Library; no screen asks "Wii U or 3DS?" except the first start, or with *Ask each time* on. |
+| P1 | **Games first; the other side one press away.** Each side's Home and Library are its games, art first. | Switching sides is one press from Home or the Library; no screen asks "Wii U or 3DS?", the first start included, unless *Ask each time* is turned on. |
 | P2 | **One focus, always found.** Exactly one thing is focused, lifted, ringed and lit. | A new player finds the focus within a second on any screen, in high contrast mode too. |
 | P3 | **Nothing teleports.** Focus glides, screens assemble, content cross-fades. | Every change of focus, screen or value has a motion; Reduce motion turns each into a short fade. |
 | P4 | **The PS5's grammar.** Cross, Circle, Options, L1/R1, the touchpad, the Create button left to the system. | A PS5 owner can use every screen without reading a hint. |
@@ -446,10 +447,12 @@ Switching sides cross-fades all four over 600 ms (Reduce motion: a 150 ms fade).
   touchpad is already the app's own key (click + Options opens the menu), so it is the app's key in
   the launcher too. The hint row says so: *[touchpad] Nintendo 3DS*.
 - **Remembered:** the app opens on the side last used; after a game, on that game's hub.
-- **First start:** after the Setup check, the app opens on the only side with games, or asks once,
-  with today's two cards restyled, when both or neither have some.
+- **First start:** after the Setup check, the app opens on the Home of the only side with games, and
+  on the Wii U side's when both or neither have some. Nothing asks which side: the other one is a
+  touchpad click away, and the hint row says so.
 - **Ask each time:** Settings > General > Start on offers *The side last used* (the default) or *Ask
-  each time*, which is today's start screen.
+  each time*, which brings back today's start screen, its two cards restyled. It is the only way the
+  app ever asks which side, and only for someone who turned it on.
 - **Settings is shared:** General first, then the side you are on, then the other side, so either
   side's settings are reachable without switching.
 
@@ -461,8 +464,8 @@ flowchart TD
     First -- yes --> Setup[Setup check]
     First -- no --> Side{"Start on"}
     Setup --> Side
-    Side -- "the side last used" --> Home
-    Side -- "ask each time" --> Chooser[Side chooser] --> Home
+    Side -- "the side last used (the default;<br/>first start: the side with games)" --> Home
+    Side -- "ask each time (opt-in)" --> Chooser[Side chooser] --> Home
     Home -- "touchpad or the switch" --> Other[The other side's Home]
     subgraph Tabs["L1 / R1"]
         Home --> Library --> Settings
@@ -1292,7 +1295,7 @@ Every feature of today's UI, where it is now, and where it goes. ✓ means uncha
 
 | Today | Where | In the new UI |
 |---|---|---|
-| Start screen: choose Wii U or 3DS, game counts, version | `StartScreen` | The side switch in the bar and on the touchpad (5.3); the chooser at first start and with *Start on: Ask each time*, with the counts; version in Settings > About and the Setup check **+** |
+| Start screen: choose Wii U or 3DS, game counts, version | `StartScreen` | Gone from the start: the app opens on a side's Home, the first start too, and the side switch in the bar and on the touchpad moves between them (5.3); the chooser, with the counts, only with *Start on: Ask each time*, which is off by default; version in Settings > About and the Setup check **+** |
 | "Starting Cemu" while its core starts | `StartScreen::ShowStarting` | On the Wii U side's Home, drawn from the catalogue, the first time per session (5.5) **+** |
 | Tabs Home, Library, Settings on L1 / R1 and on the bar | `TabsKey` | ✓ |
 | Clock | `menu-clock` | ✓, with the connected controllers and network status **+** |
