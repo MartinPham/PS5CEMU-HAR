@@ -5,8 +5,8 @@ them · **Mockups:** [`docs/ui-redesign/`](ui-redesign/), from HTML sources in
 [`docs/ui-redesign/mockups/`](ui-redesign/mockups/)
 
 This document proposes replacing PS5CEMU-HAR's interface with one that feels like it belongs on a
-PS5: one library for both emulators, drawn on the GPU at 4K, with motion, sound and controller
-conventions taken from the console itself. Every feature the app has today stays. The document covers
+PS5: one app for both emulators, each on its own side, drawn on the GPU at 4K, with motion, sound and
+controller conventions taken from the console itself. Every feature the app has today stays. The document covers
 what was studied, what the new design is, and what the code change involves, file by file and phase
 by phase.
 
@@ -22,7 +22,7 @@ frame rates is illustrative.</sub>
 2. [The UI today](#2-the-ui-today)
 3. [Research: what makes an emulator UI good, on a PS5 and elsewhere](#3-research-what-makes-an-emulator-ui-good-on-a-ps5-and-elsewhere)
 4. [Principles](#4-principles)
-5. [Cemu and Azahar as one app](#5-cemu-and-azahar-as-one-app)
+5. [Cemu and Azahar: two sides of one app](#5-cemu-and-azahar-two-sides-of-one-app)
 6. [Screens](#6-screens)
 7. [Visual system](#7-visual-system)
 8. [Motion, sound and touch](#8-motion-sound-and-touch)
@@ -40,11 +40,11 @@ frame rates is illustrative.</sub>
 
 Five changes do most of the work:
 
-1. **One app, one library.** The start screen that makes you choose Wii U or 3DS before you see a game
-   goes. Home, Library and Settings show both systems' games together; each game carries its system
-   (a badge, its case's shape, its colour) instead of each system being its own app with its own
-   tabs. Cemu's core still starts only for a Wii U game, so one emulator per session stays true
-   ([section 5](#5-cemu-and-azahar-as-one-app)).
+1. **Two sides, one app.** With the Wii U side picked, Home and the Library show only Wii U games; with
+   the 3DS side picked, only 3DS games. The sides become two states of one shell: one design, one
+   codebase, one Settings. A switch at the top left (or one click of the touchpad) moves between
+   them, the app remembers the side, and the start screen stays as an option
+   ([section 5](#5-cemu-and-azahar-two-sides-of-one-app)).
 2. **The launcher moves to the GPU.** Today it is drawn by SDL's software renderer at 1080p, which
    rules out the motion, depth and 4K text that make a console UI feel finished. The proposal is a
    small Vulkan renderer on the RADV driver the app already links, drawing signed-distance shapes and
@@ -129,9 +129,10 @@ art in the preview's sample library, so the icon fallback shows).
 | **Library** | **Settings** |
 | ![](ui-redesign/current/library.png) | ![](ui-redesign/current/video.png) |
 
-1. **Two apps behind a door.** The first thing every session asks is which console, before a single
-   game is visible. Home, Library and Settings then exist twice, in two colours, and Circle on Home
-   means "change emulator". The player's mental model is games; the app's is emulators.
+1. **A door at every start.** The first thing every fresh start asks is which console, before a
+   single game is visible, and changing sides means going back out through that door (Circle on Home
+   is "change emulator"). Behind it, Home, Library and Settings are built twice, as two RmlUi
+   documents in two stylesheets.
 2. **Home shows the least interesting picture.** The hero is the game's icon on a large card
    (`ShowIcon`, `launcher.cpp:987`; box art "is the library's"), so the biggest image on the
    screen is a 128-pixel Wii U icon or a 48-pixel 3DS one, scaled. A third of the screen is a
@@ -212,8 +213,9 @@ after opening an OpenGL display (shader builds), so **don't close the display fo
 - **ES-DE**, **Playnite's fullscreen mode** and **LaunchBox's Big Box** exist because people want one
   library across many systems, art-first, driven by a controller. ES-DE's classic flow is a carousel
   of systems, then a game list: a step that adds nothing when you have two systems. Big Box leans on
-  high-impact visuals; Playnite on breadth and openness. **Take:** a unified library, with the system
-  as a filter rather than a place you go.
+  high-impact visuals; Playnite on breadth and openness. **Take:** art first and controller first; and
+  since a carousel of two systems is a step with two stops, moving between our two sides must be one
+  press, not a screen.
 - **Steam's Big Picture**, rebuilt from the Steam Deck UI, was praised for its controller-first home
   with "continue playing" and universal search, and criticised for "sub-menu hell": two to five more
   presses for common tasks than the old one. **Take:** the home row; **avoid:** burying frequent
@@ -267,8 +269,8 @@ From the issue tracker (16 issues as of 2026-10-05):
 
 ### 3.7 What it adds up to
 
-Good emulator UIs on a TV share five traits: **the games are the interface** (art first, systems as
-metadata); **they speak the host console's language** (buttons, layouts, sounds people already know);
+Good emulator UIs on a TV share five traits: **the games are the interface** (art first, the system
+as context, never a maze); **they speak the host console's language** (buttons, layouts, sounds people already know);
 **every state is visible and explained** (one focus, real progress, plain errors); **they are fast
 and alive** (input on the frame it arrives, motion that shows where things went, 60 fps); and
 **depth is available but never in the way** (per-game settings and graphic packs behind Options, not
@@ -282,7 +284,7 @@ Each principle has a test a screen must pass before it ships.
 
 | # | Principle | The test |
 |---|---|---|
-| P1 | **Games first, systems second.** The library is one shelf; a game's system is shown, not navigated to. | No screen asks "Wii U or 3DS?" unless the answer changes what happens (installing, a system's settings). |
+| P1 | **Games first; the other side one press away.** Each side's Home and Library are its games, art first. | Switching sides is one press from Home or the Library; no screen asks "Wii U or 3DS?" except the first start, or with *Ask each time* on. |
 | P2 | **One focus, always found.** Exactly one thing is focused, lifted, ringed and lit. | A new player finds the focus within a second on any screen, in high contrast mode too. |
 | P3 | **Nothing teleports.** Focus glides, screens assemble, content cross-fades. | Every change of focus, screen or value has a motion; Reduce motion turns each into a short fade. |
 | P4 | **The PS5's grammar.** Cross, Circle, Options, L1/R1, the touchpad, the Create button left to the system. | A PS5 owner can use every screen without reading a hint. |
@@ -296,45 +298,62 @@ Each principle has a test a screen must pass before it ships.
 
 ---
 
-## 5. Cemu and Azahar as one app
+## 5. Cemu and Azahar: two sides of one app
 
 ### 5.1 The decision
 
-Three ways to combine the two emulators were weighed:
+The app keeps its two sides. With the Wii U side picked, Home and the Library show only Wii U games;
+with the 3DS side picked, only 3DS games. What changes is everything around them: the two sides
+become two states of one shell (one design, one codebase, one Settings, one set of overlays), and
+moving between them takes one press instead of a trip back through the start screen.
 
 | Option | What it is | For | Against |
 |---|---|---|---|
-| **A. Two sides, better door** | Keep the start screen and the two launchers; restyle them | Least work; matches the code's structure | Keeps the extra decision every session; keeps two of everything; doesn't scale to a third system |
-| **B. Systems as places** (ES-DE style) | A system carousel first, then that system's games | Familiar from frontends | The carousel is a step with two stops; still two libraries |
-| **C. One shell** (proposed) | One Home, one Library, one Settings; the system is a property of each game and a filter | Matches how people think (games), like the PS5's own library; the extra step disappears; room for more systems | Needs a launcher-side catalogue so Cemu need not start to list Wii U games (5.4) |
+| **A. Today** | Two launchers behind a start screen | Familiar | A door at every fresh start; switching means going back out through it; every screen built twice (two RmlUi documents, two stylesheets) |
+| **B. One mixed library** | Both systems' games in one shelf, the system as a badge and a filter | One place for everything | A 200-game 3DS collection buries a handful of Wii U games; each side loses its identity; Wii U games would have to be listed without Cemu |
+| **C. Two sides of one shell** (adopted) | A side switch in the bar, like the PS5's Games and Media; each side's Home and Library show only its games | Each side keeps its focus and colours; one press to switch; one codebase | The switch must be fast and obvious (5.3) |
 
-**C** is the proposal. The PS5 itself has one library for PS4 and PS5 games, with the platform as a
-badge and a filter; PS5CEMU-HAR should feel the same.
+**C** is the design. The PS5 works the same way: Games and Media are two spaces of one home screen,
+switched at its top left.
 
-### 5.2 How the systems stay legible
+### 5.2 How each side looks like itself
 
-Unifying the library must not blur which game runs where. Four cues do it, all at the game level:
+1. **The accent:** sky blue on the Wii U side, sand gold on the 3DS side, today's colours, for the
+   focus glow, the switch, kickers and the side's settings.
+2. **The backdrop:** the focused game's own picture (a Wii U game's boot screen, a 3DS game's
+   screenshot: 7.4) over the side's motif, bubbles on the Wii U side and waves on the 3DS side.
+3. **The covers:** the Wii U's tall 5:7 cases, the 3DS's shorter and wider ones.
+4. **The light bar:** blue on the Wii U side, gold on the 3DS side.
 
-1. **The system badge**: a small sky (Wii U) or sand (3DS) chip next to every game's name.
-2. **The case's shape**: Wii U covers are tall (5:7), 3DS covers shorter and wider. The Library stands
-   them on a shared baseline, like cases on a shelf, so the shape alone tells them apart.
-3. **The accent**: sky blue and sand gold, the banner's colours, appear only where a game or a
-   system's setting is concerned. The app's own chrome is neutral ink and white.
-4. **The backdrop's motif**: when a Wii U game has the focus, a few faint bubbles rise behind the
-   screen; when a 3DS game has it, faint waves drift. The two backgrounds the app has today become one
-   backdrop that leans toward whichever system you are looking at, and it cross-fades as the focus
-   moves. The light bar follows: blue for a Wii U game, gold for a 3DS game.
+Switching sides cross-fades all four over 600 ms (Reduce motion: a 150 ms fade). The start screen's
+"seam", bubbles meeting waves, stays as the brand's mark, on the Setup check and the side chooser.
 
-The start screen's "seam" (bubbles meeting waves) survives as the brand's mark and on the Setup check.
+### 5.3 Picking and switching sides
 
-### 5.3 Navigation map
+- **The switch** sits at the left of the bar: *Wii U | 3DS*, the side you are on lit in its colour.
+  Up to the bar, Left onto the switch, then Left, Right or Cross.
+- **One press:** a click of the touchpad on Home or the Library switches sides. In a game the
+  touchpad is already the app's own key (click + Options opens the menu), so it is the app's key in
+  the launcher too. The hint row says so: *[touchpad] Nintendo 3DS*.
+- **Remembered:** the app opens on the side last used; after a game, on that game's hub.
+- **First start:** after the Setup check, the app opens on the only side with games, or asks once,
+  with today's two cards restyled, when both have some.
+- **Ask each time:** Settings > General > Start on offers *The side last used* (the default) or *Ask
+  each time*, which is today's start screen.
+- **Settings is shared:** General first, then the side you are on, then the other side, so either
+  side's settings are reachable without switching.
+
+### 5.4 Navigation map
 
 ```mermaid
 flowchart TD
     Boot([App starts]) --> First{"First start,<br/>or a check failed?"}
     First -- yes --> Setup[Setup check]
-    First -- no --> Home
-    Setup --> Home
+    First -- no --> Side{"Start on"}
+    Setup --> Side
+    Side -- "the side last used" --> Home
+    Side -- "ask each time" --> Chooser[Side chooser] --> Home
+    Home -- "touchpad or the switch" --> Other[The other side's Home]
     subgraph Tabs["L1 / R1"]
         Home --> Library --> Settings
     end
@@ -355,45 +374,38 @@ flowchart TD
 Overlays sit above any screen: the dropdown picker, a setting's help (Triangle), the update sheet,
 toasts, and the on-screen keyboard.
 
-### 5.4 One library without starting Cemu
+### 5.5 Under the hood
 
-Today the Wii U's games come from Cemu's own title list, which needs `ps5emu::InitializeCore`
-(guest memory, system threads, graphic packs, the scan). That is why the app chooses a side first:
-starting Cemu for a player who wants a 3DS game costs seconds and memory for nothing
-(`port/main_ps5.cpp:149`). One library must not change that. The plan:
+- **Each side prepares as today** (`prepare`, `port/main_ps5.cpp:149`): the Wii U side starts Cemu's
+  core once per session (guest memory, system threads, graphic packs, its scan); the 3DS side starts
+  Azahar's library scan. Moving between sides never restarts the app, as today. One emulator per
+  session stays true: a core only runs a game, and the app starts over after every game.
+- **A launcher-side catalogue** (`port/app/catalog.{h,cpp}`) keeps each side's last game list in
+  `/data/ps5cemu/library.json`: title ID, name (all scripts), path, format, version, update and DLC,
+  GameTDB ID, box-art path, backdrop picture (7.4), two ambient colours, last played, play time,
+  last-session frame rate, and a per-game pack summary. A side draws from it at once while its scan
+  runs; the scan's list replaces it when it finishes.
+- **Starting Cemu** takes a few seconds the first time the Wii U side opens in a session. Today the
+  start screen shows "Starting Cemu" on its card meanwhile; the new side shows it on its Home, already
+  drawn from the catalogue. Whether `InitializeCore` can run off the launcher's thread, so the screen
+  stays live meanwhile, is an open question (section 12); if it cannot, the screen holds, as today.
+- **Wii U boot screens** can be read while Cemu's core is up on the Wii U side, the way
+  `port/app/covers.cpp` reads icons (7.4).
 
-- **A launcher-side catalogue** (`port/app/catalog.{h,cpp}`) holds both systems' games: title ID,
-  name (all scripts), system, path, format, version, update and DLC, GameTDB ID, box-art path, two
-  ambient colours, last played, play time, and a per-game pack summary. It is saved to
-  `/data/ps5cemu/library.json` after every scan, so Home and Library draw instantly on the next start.
-- **The 3DS half** is filled as now: Azahar's library is already read by the launcher
-  (`port/azahar/library.cpp`).
-- **The Wii U half** comes from the catalogue's saved copy of Cemu's last scan, checked for files that
-  have gone. New Wii U files are found by a light launcher-side scan of the game folders (the same walk
-  `CountGames` does today): unpacked folders give their `meta/meta.xml` at once; `.wua`, `.wud` and
-  `.wux` appear under their file name, marked "details after Cemu's next look", until Cemu's scan fills
-  them in.
-- **Cemu starts when it is needed:** for a Wii U game's launch (its loading screen already covers
-  the wait), or for a page that needs Cemu's state (a game's graphic packs, Wii U controllers, USB
-  devices, installs). Those pages show "Starting Cemu" with progress for the few seconds it takes, once
-  per session. Settings > Games and folders > *Look for games now* starts it on purpose.
-- **Azahar's core** starts only for a 3DS game, as now. Leaving a game still starts the app over
-  (`RestartToLibrary`): with one shell, it reopens on the hub of the game you just left.
+### 5.6 Buttons
 
-### 5.5 Buttons
+| Where | Cross | Circle | Square | Triangle | Options | L1 / R1 | L2 / R2 | Touchpad |
+|---|---|---|---|---|---|---|---|---|
+| Home row | Play | — | — | — | Game menu | Tabs | — | Switch side |
+| Home, below the row | The focused button | Up to the row | — | — | Game menu | Tabs | — | Switch side |
+| Library | Play | Home tab | Sort | Search | Game menu | Tabs | Previous / next letter | Switch side |
+| Game hub | The focused button | Back | — | — | Game menu | Previous / next game | — | — |
+| Settings | Choose / open | Back | Back to *Default* (game settings) | More about it | — | Tabs | Previous / next section | — |
+| Dropdown, help, sheets | Choose | Cancel | — | — | — | — | Page up / down | — |
+| Quick Menu (in a game) | Choose | Back, then close | — | — | Close | Previous / next slot | — | — |
 
-| Where | Cross | Circle | Square | Triangle | Options | L1 / R1 | L2 / R2 |
-|---|---|---|---|---|---|---|---|
-| Home row | Play | — | — | — | Game menu | Tabs | — |
-| Home, below the row | The focused button | Up to the row | — | — | Game menu | Tabs | — |
-| Library | Play | Home tab | Sort | Search | Game menu | Tabs | Previous / next letter |
-| Game hub | The focused button | Back | — | — | Game menu | Previous / next game | — |
-| Settings | Choose / open | Back | Back to *Default* (game settings) | More about it | — | Tabs | Previous / next section |
-| Dropdown, help, sheets | Choose | Cancel | — | — | — | — | Page up / down |
-| Quick Menu (in a game) | Choose | Back, then close | — | — | Close | Previous / next slot | — |
-
-Left and Right change a focused value everywhere. Create is never used: the system owns it. The
-touchpad is the in-game shortcut key, as now (click + Options, L1, R1).
+Left and Right change a focused value everywhere. Create is never used: the system owns it. In a game
+the touchpad stays the shortcut key, as now (click + Options, L1, R1).
 
 ---
 
@@ -405,17 +417,17 @@ touchpad is the in-game shortcut key, as now (click + Options, L1, R1).
 
 **Purpose:** back into a game in one press.
 
-- **The row:** the recent games of both systems, newest first, the focused cover larger (PS5 home
-  style), then *All games* to the Library. The current app keeps four recent games per system; the
-  catalogue keeps twelve across both.
+- **The row:** the side's recent games, newest first, the focused cover larger (PS5 home style), then
+  *All games* to the Library. The current app keeps four recent games per side; the catalogue keeps
+  twelve per side.
 - **The hub preview** under the row: the system badge and "Continue · last played …", the name at
   display size (two lines at most, never cut mid-word: it wraps or shrinks one step), publisher, year,
   play time, the compatibility status, then **Play**, **Game hub** and **…** (the Game menu).
 - **Glance cards** along the bottom: shortcuts into the game's state, never tasks. Graphic packs
   (count and names), Controllers (who is which controller), How it runs (status, average frame rate
   of the last session from the `[perf]` lines the app already logs), Updates and DLC. Each opens its
-  page; a card with nothing to say is left out. The cards read the catalogue's saved summary (5.4), so
-  showing them never starts Cemu.
+  page; a card with nothing to say is left out. The cards read the catalogue's saved summary (5.5), so
+  they show at once, before the side's scan finishes.
 - **The backdrop** takes the focused cover's two ambient colours (7.4), eased over 600 ms.
 - **States:** first start opens the Setup check instead; no games shows a single card, "Your games go
   here", with *Choose a folder* focused; a launch error from the last session shows as a card above
@@ -425,11 +437,12 @@ touchpad is the in-game shortcut key, as now (click + Options, L1, R1).
 
 ![Library](ui-redesign/02-library.jpg)
 
-**Purpose:** every game, both systems, found fast.
+**Purpose:** every game on this side, found fast.
 
-- **Filters** across the top: *All*, *Wii U*, *Nintendo 3DS*, *Recently added*, each with its count.
-  Left and Right on the filter row, or Up from the first shelf. With *Nintendo 3DS* chosen, the first
-  tile is *Play from your 3DS*: Artic Base, which today has a button on the 3DS side's Home.
+- **Filters** across the top: *All*, *Recently added*, *Favourites*, each with its count; on the
+  Wii U side also *Graphic packs on*. Left and Right on the filter row, or Up from the first shelf. On
+  the 3DS side the shelf's first tile is *Play from your 3DS*: Artic Base, which today has a button on
+  the 3DS side's Home.
 - **Sort** (Square): *Recently played*, *A to Z*, *Release year*, *How it runs*. **Search** (Triangle)
   opens the on-screen keyboard; results narrow as you type.
 - **The shelf**: covers at their natural shapes on a shared baseline, rows of equal height. The
@@ -475,7 +488,8 @@ when some are on) · *Start without cheats* (3DS, when some are on) · *Look for
 
 **Purpose:** everything the app can change, in one list, with each setting showing its effect.
 
-**Structure** (every row of today's two Settings tabs has a place; Appendix A has the mapping):
+**Structure** (every row of today's two Settings tabs has a place; Appendix A has the mapping). The
+section of the side you are on comes right after General, the other side's after it:
 
 | Section | Pages |
 |---|---|
@@ -609,13 +623,14 @@ app and `tokens.css` for the mockups. Nothing else defines a colour, a size or a
 | `glass` / `glass-2` | white at 5.5 % / 8.5 % | Cards, rows, resting buttons |
 | `glass-edge` | white at 10 % | One-pixel light edge on glass |
 | `text` | `#f5f7fb` | All text; secondary at 70 %, tertiary at 46 % opacity |
-| `wiiu` / `wiiu-strong` | `#5aa9ff` / `#2f7fe8` | Wii U badges, filters, its settings' accents |
-| `n3ds` / `n3ds-strong` | `#f4b63f` / `#d9961b` | 3DS badges, filters, its settings' accents |
+| `wiiu` / `wiiu-strong` | `#5aa9ff` / `#2f7fe8` | The Wii U side's accent, its badges and settings |
+| `n3ds` / `n3ds-strong` | `#f4b63f` / `#d9961b` | The 3DS side's accent, its badges and settings |
 | `good` / `warn` / `bad` | `#3dd6a3` / `#ffb547` / `#ff7272` | Compatibility status, checks |
 | `focus` | `#ffffff` | The focus ring |
 
-Hierarchy is by size and opacity, not by colour; the accent appears once per region at most. The
-system colours are today's (`render-layout.py`'s `accent`), so the change keeps the app recognisable.
+Hierarchy is by size and opacity, not by colour; the accent appears once per region at most. The side
+you are on sets the accent, sky on the Wii U side and sand on the 3DS side: today's colours
+(`render-layout.py`'s `accent`), so the change keeps the app recognisable.
 
 ### 7.2 Type
 
@@ -786,7 +801,7 @@ port/frontend/
 ├── sound.{h,cpp}, settings.{h,cpp}   kept and extended (8.2, 9.8)
 └── classic/                     today's launcher.cpp, ui_host.cpp, bubbles, wave, until removed
 port/app/
-├── catalog.{h,cpp}              the one library (5.4), library.json
+├── catalog.{h,cpp}              each side's cached game list (5.5), library.json
 ├── ambient.{h,cpp}              two colours per cover (7.4)
 └── ingame/quick_menu.{h,cpp}    the Quick Menu's model and drawing; ingame.cpp and ingame3ds.cpp
                                  keep their emulator hooks and supply its rows
@@ -857,15 +872,14 @@ namespace ps5catalog
 		uint32_t minutesPlayed = 0;
 		float lastSessionFps = 0;	   // from the [perf] / [perf3ds] lines of the last session
 		uint8_t packsOn = 0;		   // Wii U: graphic packs on, as Cemu last saw them
-		bool provisional = false;	   // Wii U found by the light scan, details after Cemu's
+		std::string backdrop;		   // the cached boot screen (Wii U) or screenshot (3DS), 7.4
 	};
 
 	void Load();					   // /data/ps5cemu/library.json
 	void Save();
-	std::span<const Entry> All();
-	void MergeWiiU(const std::vector<ps5emu::Game>& games);	   // after Cemu's scan
-	void MergeN3ds(const std::vector<ps5emu::Game>& games);	   // after Azahar's
-	void ScanWiiULight(const std::string& folder);			   // 5.4, no Cemu needed
+	std::vector<const Entry*> Games(System side);	   // a side's games, as last saved or scanned
+	// After a side's scan: its list replaced, play times, colours and pictures kept by title ID
+	void Replace(System side, const std::vector<ps5emu::Game>& scanned);
 }
 ```
 
@@ -930,7 +944,7 @@ display.
 | File (lines) | Becomes |
 |---|---|
 | `port/frontend/launcher.cpp` (3,694) | Split: the state machine into `shell.cpp` and `screens/`; the RmlUi id writing deleted; the non-UI helpers (folder listing, game counts, `CopyLogsToUsb`, `ClearShaderCaches`, Artic addresses, mapping capture) moved unchanged into `actions.cpp`. A copy stays in `classic/` until removal. |
-| `port/frontend/launcher.h` (48) | Kept as the shell's API: `Run(settings, status, prepare)` and `Choice`; `prepare` becomes "make this system ready", called for the chosen game's system |
+| `port/frontend/launcher.h` (48) | Kept as the shell's API: `Run(settings, status, prepare)` and `Choice`; `prepare` is called when a side opens, as today |
 | `port/frontend/ui_host.{h,cpp}` (802) | `classic/`; replaced by `ui/gfx/device` |
 | `port/frontend/bubbles.*`, `wave.*` (288) | Their parameters drive the backdrop's motifs; the CPU versions stay with classic |
 | `port/frontend/sound.{h,cpp}` (383) | Kept; new cues, pan, pitch and variations (8.2) |
@@ -942,7 +956,7 @@ display.
 | `tools/launcher-preview/` (1,054 + script) | Rebuilt on the kit with desktop Vulkan (Mesa's lavapipe in CI); `screens.txt`'s script format kept |
 | `port/app/side_menu.h`, `menu_canvas.h` (455) | Replaced by the kit's widgets and `app/ingame/quick_menu.cpp` |
 | `port/app/ingame.cpp` (690), `ingame3ds.cpp` (1,012) | Keep their hooks and content; drawing and keyboard move to the kit (9.5) |
-| `port/main_ps5.cpp` (241) | The side choice goes; `prepare` starts Cemu's core or Azahar's scan for the game's system |
+| `port/main_ps5.cpp` (241) | The side choice moves into the shell's switch; `prepare` is unchanged (Cemu's core or Azahar's scan, per side) |
 | `port/app/boxart.cpp`, `covers.cpp`, `gameinfo.cpp`, `compatibility.cpp`, `port/azahar/library.cpp` | Unchanged; box art arrivals also trigger the ambient colours |
 | `port/CMakeLists.txt` | New sources; a step compiling the UI's shaders to SPIR-V with the pinned glslang |
 | `patches/cemu` | One more patch: Cemu's shader-cache loading screen drawn by the kit (6.8) |
@@ -954,14 +968,14 @@ of launcher, host, layout script and stylesheet); the Quick Menu about 1,500 (re
 
 - `ps5cemu.json` gains `"version": 2`. Every current key is read as before; unknown keys are kept on
   save, so going back to an older release loses nothing.
-- **Removed:** `side` (the shell always opens on Home, or on the hub of the game just played) and the
-  two `gameCount`s (the catalogue has them).
-- **Merged:** the two `recent` lists become the catalogue's last-played times; the old lists, which
-  have no times, are interleaved once on migration.
+- **Kept, with a new meaning:** `side` is now the side last used, restored at every start (today it is
+  kept only across a game's restart). **Removed:** the two `gameCount`s (the catalogue has them).
+- **Moved:** each side's `recent` list becomes the catalogue's last-played times for that side; the
+  old lists, which have no times, keep their order on migration.
 - **Added:** `games.<title ID>` (game settings, 6.5), `ui.textScale`, `ui.highContrast`,
-  `ui.reduceMotion`, `ui.holdMs`, `ui.libraryFilter`, `ui.librarySort`, and `ui.classic` (the
-  fallback switch).
-- `library.json` holds the catalogue (5.4); deleting it only costs one full scan.
+  `ui.reduceMotion`, `ui.holdMs`, `ui.startOn` (`last` or `ask`), `ui.libraryFilter` and
+  `ui.librarySort` (per side), and `ui.classic` (the fallback switch).
+- `library.json` holds the catalogue (5.5); deleting it only costs one full scan of each side.
 
 ### 9.9 Testing
 
@@ -986,7 +1000,7 @@ held while the app starts, as RetroArch PS5 does for its pre-screen).
 | Phase | What | Exit criteria | Size |
 |---|---|---|---|
 | **0. Foundations** | `ui/gfx` on VideoOut (9.4), the SDF batch, text, springs, input, feedback; the preview harness on lavapipe; a gallery screen showing every widget | Gallery at 4K, 60 fps on a PS5 and a PS5 Pro (tour log: p99 under 17 ms, max under 21 ms); first frame within 1.5 s of the launcher opening; twenty clean hand-overs of VideoOut to each emulator | 2–3 weeks |
-| **1. The shell, at parity** | The catalogue and lazy Cemu (5.4); Home, Library, Game hub, Game menu, Settings with every current setting and page, the launch screen, the update sheet | Every launcher row of Appendix A ticked; a snapshot for every screen; launch times no slower than 3.0.0's | 4–5 weeks |
+| **1. The shell, at parity** | The catalogue (5.5) and the side switch (5.3); Home, Library, Game hub, Game menu, Settings with every current setting and page, the launch screen, the update sheet | Every launcher row of Appendix A ticked; a snapshot for every screen; launch times no slower than 3.0.0's | 4–5 weeks |
 | **2. In a game** | The Quick Menu on the kit for both systems; one keyboard; hold to confirm; save-state thumbnails; toasts; Cemu's shader-cache screen | Every in-game row of Appendix A ticked; the menu at 60 fps over a 4K game without lowering the game's own frame rate measurably | 2–3 weeks |
 | **3. The rest of the design** | Setup check; game settings; search, sort and filters; accessibility switches; frame-rate stats; light bar and rumble; touchpad zones and reserved buttons in mapping | The principles' tests (section 4) pass on every screen | 2–3 weeks |
 | **4. Reach** | The PS5's system language and a string table; an opt-in companion page by QR for long text and game settings (LAN only, off by default, as PS5SX2 and RetroArch PS5 do it); classic removed after a release with no fallback reports | — | Open |
@@ -1002,7 +1016,7 @@ Altogether 12 to 16 weeks for Phases 0 to 3.
 | Vulkan on VideoOut fails again | Medium | Phase 0 slips | The step-by-step bring-up (9.4); Cemu's working setup as the reference; the classic launcher ships meanwhile |
 | The first frame is slow (device and pipeline creation) | Medium | A slower start after every game | One pipeline, a pipeline cache on `/data`, the splash screen held until the first frame; measure in Phase 0 against the 1.5 s budget |
 | The launcher's GPU memory isn't all freed before a game | Low | Less memory for Cemu | Everything is destroyed with the device; the boot log's `[memory]` line before and after compares with 3.0.0's |
-| The catalogue disagrees with Cemu's scan | Medium | A Wii U game missing or doubled until Cemu looks | Cemu's scan always wins on merge; *Look for games now* in Settings; provisional entries are marked |
+| The catalogue is out of date | Medium | A removed game shown, or a new one missing, until the side's scan finishes (seconds) | The scan's list replaces the side's when it finishes; a game whose file is gone is dimmed and says so; *Look for games now* in Settings |
 | System fonts differ between firmwares | Low | A script falls back to boxes | Probe the known paths at start; log what was found; Settings > About says which fonts are in use |
 | The in-game kit costs the game frames | Low | Menus stutter the game | The batch is a few dozen draws; measure in Phase 2; the ImGui path remains for one release |
 | Scope grows | High | The release slips | The phases are each shippable; Phase 4 is optional by design |
@@ -1017,11 +1031,13 @@ Altogether 12 to 16 weeks for Phases 0 to 3.
 2. **Leaving a game without a restart.** `RestartToLibrary` exists because Cemu cannot end a game
    reliably in one process. The design hides the restart, but if Azahar can end a game cleanly, 3DS
    games could return without one.
-3. **Recent games:** twelve across both systems (proposed), or keep a per-system limit?
-4. **The start screen:** is there anyone who wants it as an option (a "start on" setting), or does
-   the one shell replace it outright?
-5. **Profiles** (ProsperoEden has eight): wanted for shared consoles, or out of scope?
-6. **The companion page:** is a LAN web service acceptable to the project, given HEN setups vary?
+3. **Recent games:** twelve per side (proposed), or keep today's four?
+4. **Starting Cemu off the launcher's thread:** can `ps5emu::InitializeCore` run on a worker, so the
+   Wii U side stays live during its first few seconds (5.5)?
+5. **Music per side:** should switching sides also switch the music (the shop theme on one side, the
+   setup theme on the other), or keep one choice for both?
+6. **Profiles** (ProsperoEden has eight): wanted for shared consoles, or out of scope?
+7. **The companion page:** is a LAN web service acceptable to the project, given HEN setups vary?
 
 ---
 
@@ -1034,15 +1050,15 @@ Every feature of today's UI, where it is now, and where it goes. ✓ means uncha
 
 | Today | Where | In the new UI |
 |---|---|---|
-| Start screen: choose Wii U or 3DS, game counts, version | `StartScreen` | Gone by design (5.1); counts on the Library's filters; version in Settings > About and the Setup check |
-| "Starting Cemu" while its core starts | `StartScreen::ShowStarting` | Inline on pages that need Cemu, and on the launch screen (5.4) **+** |
+| Start screen: choose Wii U or 3DS, game counts, version | `StartScreen` | The side switch in the bar and on the touchpad (5.3); the chooser at first start and with *Start on: Ask each time*, with the counts; version in Settings > About and the Setup check **+** |
+| "Starting Cemu" while its core starts | `StartScreen::ShowStarting` | On the Wii U side's Home, drawn from the catalogue, the first time per session (5.5) **+** |
 | Tabs Home, Library, Settings on L1 / R1 and on the bar | `TabsKey` | ✓ |
 | Clock | `menu-clock` | ✓, with the connected controllers and network status **+** |
 | Hints, at most four | `SetHints` | ✓ |
-| Back to the start screen with Circle on Home | `m_leaving` | Gone with the start screen |
-| Opening on the side last played | `settings.side` | Opens on the hub of the game just played **+** |
+| Back to the start screen with Circle on Home | `m_leaving` | The switch (touchpad, or the bar); the chooser when *Ask each time* is on **+** |
+| Opening on the side last played | `settings.side` | ✓, at every start, and on the hub of the game just played **+** |
 | A notice on Home (no `/data`, Cemu failed, a launch error) | `Notice()` | A card on Home, and the Setup check **+** |
-| Background: bubbles (Wii U), waves (3DS), both (start) | `ui_host.cpp` `Background` | The ambient backdrop with the motif of the focused game's system **+** |
+| Background: bubbles (Wii U), waves (3DS), both (start) | `ui_host.cpp` `Background` | ✓ as each side's motif, under the focused game's own picture (7.4) **+** |
 | Music (shop, setup, off), its volume, menu sounds | `ps5sound`, Settings > Audio | ✓ in Settings > Sound; more cues (8.2) **+** |
 | Controllers joining and leaving (rescan every two seconds) | `Run`'s `frame` | ✓ |
 | The update prompt over any screen: available, downloading, checking, installing, restart, failed | `UpdatePrompt` | The update sheet, with release notes **+** |
@@ -1053,15 +1069,15 @@ Every feature of today's UI, where it is now, and where it goes. ✓ means uncha
 |---|---|---|
 | Continue: the last game, publisher and year, status, Play and Details | `UpdateHome` | The row's focused cover and the hub preview **+** |
 | Library or Settings buttons when there is no last game | `HeroActions` | The empty-library card; the Setup check |
-| Artic Base button (3DS) | `HeroAction::Artic` | A first tile in the Library's 3DS filter, "Play from your 3DS", and Settings > Nintendo 3DS > Artic Base |
-| Recent games shelf and All games | `ShowIconTile` | The row, both systems, and *All games* ✓ |
+| Artic Base button (3DS) | `HeroAction::Artic` | The 3DS side's first Library tile, "Play from your 3DS", and Settings > Nintendo 3DS > Artic Base |
+| Recent games shelf and All games | `ShowIconTile` | The row (the side's games) and *All games* ✓ |
 | Square: a game's page | `HomeKey` | Down, or *Game hub*, or the Game menu |
 
 ### Library and game pages
 
 | Today | Where | In the new UI |
 |---|---|---|
-| Grid of box art (or icons), scroll bar, count | `UpdateLibrary` | The shelf, the index, the filter counts **+** |
+| Grid of box art (or icons), scroll bar, count | `UpdateLibrary` | The side's shelf, the index, the filter counts **+** |
 | "Looking for games…", empty library text | `library-empty` | ✓ in the filter row and the empty card |
 | L2 / R2 a page at a time | `LibraryKey` | Previous / next letter or year **+** |
 | Cross plays, Square details, Triangle graphic packs | `LibraryKey` | Cross plays; Options: hub, packs, game settings **+** |

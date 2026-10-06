@@ -58,6 +58,13 @@ const GAMES = {
 	icarus: { name: 'Kid Icarus: Uprising', a: '#1c63c9', b: '#ffffff', motif: 'rays', sys: 'n3ds' },
 	sm3dl: { name: 'Super Mario 3D Land', a: '#c8102e', b: '#ffd700', motif: 'stars', sys: 'n3ds' },
 	yokai: { name: '妖怪ウォッチ2 真打', a: '#3b1a6e', b: '#ff5fa2', motif: 'blobs', sys: 'n3ds' },
+	bravely: { name: 'Bravely Default', a: '#1b2a4a', b: '#f2d38a', motif: 'rays', sys: 'n3ds' },
+	kirby: { name: 'Kirby: Planet Robobot', a: '#e85a9a', b: '#ffe1f0', motif: 'stars', sys: 'n3ds' },
+	mk7: { name: 'Mario Kart 7', a: '#0c3e8c', b: '#ff3b30', motif: 'rays', sys: 'n3ds' },
+	oras: { name: 'Pokémon Omega Ruby', a: '#5a0b0b', b: '#ff5a3c', motif: 'planet', sys: 'n3ds' },
+	smash: { name: 'Super Smash Bros. for Nintendo 3DS', a: '#101820', b: '#ffcc33', motif: 'rays', sys: 'n3ds' },
+	oot3d: { name: 'The Legend of Zelda: Ocarina of Time 3D', a: '#0e3b2e', b: '#ffd36b', motif: 'hills', sys: 'n3ds' },
+	xc3d: { name: 'Xenoblade Chronicles 3D', a: '#0a2140', b: '#7fd0ff', motif: 'planet', sys: 'n3ds' },
 };
 
 function motif(kind, a, b) {
@@ -90,3 +97,68 @@ function paintCovers() {
 }
 
 document.addEventListener('DOMContentLoaded', paintCovers);
+
+// Stand-ins for the backdrops: a Wii U game's boot screen (meta/bootTvTex.tga, 1280 x 720) and a 3DS
+// game's top-screen screenshot (400 x 240 native). The app shows the real ones; these are drawn.
+function hills(ctx, w, h, y, amp, colour, seed) {
+	ctx.fillStyle = colour;
+	ctx.beginPath();
+	ctx.moveTo(0, h);
+	for (let x = 0; x <= w; x += w / 48) {
+		const t = x / w;
+		ctx.lineTo(x, y - amp * (0.55 * Math.sin(t * 7.1 + seed) + 0.3 * Math.sin(t * 17.3 + seed * 2) + 0.15 * Math.sin(t * 41 + seed * 3)));
+	}
+	ctx.lineTo(w, h);
+	ctx.closePath();
+	ctx.fill();
+}
+
+const BACKDROPS = {
+	'boot:botw': (ctx, w, h) => {
+		const sky = ctx.createLinearGradient(0, 0, 0, h);
+		sky.addColorStop(0, '#7fb9d6'); sky.addColorStop(0.55, '#e9e3c8'); sky.addColorStop(1, '#f2d9a6');
+		ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
+		const sun = ctx.createRadialGradient(w * 0.72, h * 0.42, 10, w * 0.72, h * 0.42, w * 0.35);
+		sun.addColorStop(0, 'rgba(255,248,220,.95)'); sun.addColorStop(1, 'rgba(255,248,220,0)');
+		ctx.fillStyle = sun; ctx.fillRect(0, 0, w, h);
+		hills(ctx, w, h, h * 0.56, 70, '#9fb7c4', 1.3);
+		hills(ctx, w, h, h * 0.64, 46, '#7d9fa0', 2.1);
+		hills(ctx, w, h, h * 0.74, 38, '#4f7d5f', 0.4);
+		hills(ctx, w, h, h * 0.86, 30, '#2f5a3c', 3.3);
+		ctx.fillStyle = '#1d3a28'; // a figure on the ridge
+		ctx.fillRect(w * 0.3, h * 0.76, 6, 18); ctx.beginPath(); ctx.arc(w * 0.3 + 3, h * 0.76 - 4, 5, 0, 7); ctx.fill();
+		ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(255,255,255,.96)'; ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 18;
+		ctx.font = '600 30px Lexend'; ctx.fillText('THE LEGEND OF ZELDA', w * 0.5, h * 0.3);
+		ctx.font = '700 64px Lexend'; ctx.fillText('BREATH OF THE WILD', w * 0.5, h * 0.3 + 70);
+		ctx.shadowBlur = 0;
+	},
+	'shot:pkx': (ctx, w, h) => {
+		const sky = ctx.createLinearGradient(0, 0, 0, h * 0.6);
+		sky.addColorStop(0, '#5fa8f0'); sky.addColorStop(1, '#bfe3ff');
+		ctx.fillStyle = sky; ctx.fillRect(0, 0, w, h);
+		ctx.fillStyle = '#8fd07a'; ctx.fillRect(0, h * 0.55, w, h * 0.45);
+		ctx.fillStyle = '#d9c9a3'; ctx.beginPath(); ctx.moveTo(w * 0.42, h); ctx.lineTo(w * 0.5, h * 0.55); ctx.lineTo(w * 0.56, h * 0.55); ctx.lineTo(w * 0.7, h); ctx.fill();
+		const houses = [[30, 95, 70, 50, '#e8e2d6', '#c0392b'], [120, 105, 60, 42, '#f1ead8', '#2e6fb5'], [270, 92, 80, 56, '#efe6d2', '#8e44ad'], [340, 110, 50, 36, '#f4efe3', '#d35400']];
+		for (const [x, y, hw, hh, wall, roof] of houses) {
+			ctx.fillStyle = wall; ctx.fillRect(x, y, hw, hh);
+			ctx.fillStyle = roof; ctx.beginPath(); ctx.moveTo(x - 6, y); ctx.lineTo(x + hw / 2, y - 22); ctx.lineTo(x + hw + 6, y); ctx.fill();
+			ctx.fillStyle = '#5a4a3a'; ctx.fillRect(x + hw / 2 - 6, y + hh - 16, 12, 16);
+		}
+		ctx.fillStyle = '#2d6a3e'; for (const x of [10, 105, 190, 250, 385]) { ctx.beginPath(); ctx.arc(x, h * 0.55, 14, 0, 7); ctx.fill(); }
+		ctx.fillStyle = '#e8323a'; ctx.fillRect(w * 0.52, h * 0.7, 10, 8); ctx.fillStyle = '#1b2a6b'; ctx.fillRect(w * 0.52, h * 0.7 + 8, 10, 12);
+		ctx.fillStyle = '#ffd36b'; ctx.fillRect(w * 0.52 + 2, h * 0.7 - 6, 6, 6);
+	},
+};
+
+function paintBackdrops() {
+	document.querySelectorAll('canvas[data-backdrop]').forEach((canvas) => {
+		const draw = BACKDROPS[canvas.dataset.backdrop];
+		if (!draw) return;
+		const shot = canvas.dataset.backdrop.startsWith('shot:');
+		canvas.width = shot ? 400 : 1280;
+		canvas.height = shot ? 240 : 720;
+		draw(canvas.getContext('2d'), canvas.width, canvas.height);
+	});
+}
+
+document.addEventListener('DOMContentLoaded', () => document.fonts.ready.then(paintBackdrops));

@@ -6,6 +6,10 @@
 		radial-gradient(55% 75% at 18% 45%, rgba(26, 128, 140, 0.55), transparent 70%),
 		radial-gradient(45% 50% at 85% 10%, rgba(154, 211, 168, 0.14), transparent 70%),
 		linear-gradient(180deg, #06161f 0%, #05070d 100%); }
+	/* on the hub the boot screen is atmosphere: full-bleed, softened and dimmed; the cover leads */
+	.boot { position: absolute; left: -30px; top: -20px; width: 1980px; height: 1114px; filter: blur(5px) saturate(1.05); }
+	.scrim { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(5, 7, 13, 0.62), rgba(5, 7, 13, 0.80) 45%, rgba(5, 7, 13, 0.84)),
+		linear-gradient(180deg, rgba(5, 7, 13, 0.2), rgba(5, 7, 13, 0) 40%, rgba(5, 7, 13, 0.9)); }
 	.hero-cover { position: absolute; left: var(--safe-x); top: 150px; width: 420px; height: 588px; border-radius: 22px; box-shadow: 0 40px 90px rgba(0,0,0,.6), 0 0 160px rgba(154,211,168,.18) !important; }
 	.reflect { position: absolute; left: 120px; top: 726px; width: 400px; height: 140px; transform: scaleY(-1); opacity: 0.16; filter: blur(2px);
 		-webkit-mask-image: linear-gradient(0deg, #000, transparent 75%); border-radius: 22px; }
@@ -33,7 +37,10 @@
 	.overline.sec { margin-bottom: 16px; }
 </style></head>
 <body><div class="canvas">
-	<div class="ambient"></div><div class="grain"></div><div class="vignette"></div>
+	<div class="ambient"></div>
+	<canvas class="boot" data-backdrop="boot:botw"></canvas>
+	<div class="scrim"></div>
+	<div class="grain"></div><div class="vignette"></div>
 
 	<div class="peek l" data-game="bayo2"></div><div class="peek r" data-game="toad"></div>
 	<div class="nav l"><span data-glyph="l1" data-size="30"></span>Bayonetta 2</div>
