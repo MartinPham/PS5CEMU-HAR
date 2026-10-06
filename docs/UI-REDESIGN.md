@@ -1356,7 +1356,7 @@ Every feature of today's UI, where it is now, and where it goes. ✓ means uncha
 | Installs > Install a CIA file (3DS) with inspect, progress, cancel | 3DS > Install CIA files ✓ |
 | Online > Box art from GameTDB, Community graphic packs, PS5CEMU-HAR updates | General > Online and updates ✓ |
 | Diagnostics > Copy logs to USB, Clear shader caches (the side's), version, firmware, HEN / JIT, logs path, session | Help > Diagnostics ✓: Clear Wii U shader caches and Clear 3DS shader caches as two rows, held to confirm; cards with status **+**; Help > Setup check **+** |
-| Settings only in `ps5cemu.json` (`radvDebug`, `radvEnvironment`, `pinCpuThreads`) | ✓, still only there |
+| Settings only in `ps5cemu.json` (`radvDebug`, `radvEnvironment`, `cemuSubmitDraws`, `pinCpuThreads`) | ✓, still only there |
 | About > credits, paths, version | Help > About ✓ |
 | Triangle: a setting's longer help | ✓ |
 | Rows dimmed when unavailable (no DualSense, no Cemu, no Artic setup) | ✓, and say why when focused **+** |
