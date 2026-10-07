@@ -1,0 +1,278 @@
+# PS5CEMU-HAR - `make release` (docs/BUILDING.md) on a GitHub-hosted runner.
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Builds everything from source as BUILDING.md describes: `make deps` fetches every input at its pin
+# (tools/deps.json) and builds the PS5 libraries into build/sysroot, `make radv` the Vulkan driver
+# (PS5_Vulkan's recipe, then patches/mesa as RADV_PATCHES names), `make azahar` the 3DS side, and
+# `make release` links, packages and zips. The run keeps:
+#
+#   PS5CEMU-HAR-v<VERSION>-<commit>   dist/PS5CEMU-HAR-vVERSION.zip (the PPSA99360 folder, for
+#                                     /data/homebrew or a folder ShadowMountPlus scans) and SHA256SUMS
+#   ps5cemu-elf-v<VERSION>-<commit>   dist/ps5cemu-vVERSION.elf, the eboot's ELF with its symbols, for
+#                                     tools/symbolize-crash.py and this build's crash reports
+#
+# Runs in an Ubuntu 24.04 container, what BUILDING.md builds on, with LLVM 18 alone: the payload
+# SDK's wrappers take the newest LLVM from 21 down, so a runner image with a newer one would change
+# the compiler.
+#
+# zlib, three times, from GitHub only: the boilerplate's and PS5_Vulkan's setup scripts download it
+# from zlib.net, which can answer a CI runner with something other than the tarball, and Mesa's zlib
+# subproject wants zlib.net and wrapdb.mesonbuild.com. zlib's and WrapDB's GitHub releases carry the
+# same files: .github/scripts/seed-zlib.sh and seed-mesa-wrap.sh put them where each one looks,
+# checked against its own pins.
+#
+# Cached between runs: the downloads (PS5CEMU_DEPS_CACHE), build/sysroot (build-deps.sh's libraries),
+# the RADV archives, and ccache (CMake's builds through CMAKE_<LANG>_COMPILER_LAUNCHER, meson's by
+# itself). A run that reaches the time limit still saves ccache, so running it again goes faster.
+name: Build
+
+on:
+  push:
+    branches: [PS5-Cemu]
+    tags: ['v*']
+    # not for documentation alone, except the compatibility list the app carries (package.sh)
+    paths: ['**', '!docs/**', '!**.md', 'docs/COMPATIBILITY.md']
+  pull_request:
+    paths: ['**', '!docs/**', '!**.md', 'docs/COMPATIBILITY.md']
+  workflow_dispatch:
+    inputs:
+      radv_patches:
+        description: RADV_PATCHES (patches/mesa numbers, "all", or "none"); empty = the Makefile's default (0006)
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: make release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    container:
+      image: ubuntu:24.04
+      # SDKs preinstalled on the runner, mounted so the job can delete them: Cemu, Azahar with its
+      # submodules, Mesa, Boost and their build trees need the disk space.
+      volumes:
+        - /usr/share/dotnet:/host-free/dotnet
+        - /usr/local/lib/android:/host-free/android
+        - /opt/ghc:/host-free/ghc
+        - /usr/local/.ghcup:/host-free/ghcup
+        - /opt/hostedtoolcache:/host-free/toolcache
+        - /usr/local/share/boost:/host-free/boost
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      CCACHE_MAXSIZE: 4G
+      # Cemu's precompiled header: ccache can still cache what uses it
+      CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Free disk space
+        run: |
+          df -h "$GITHUB_WORKSPACE"
+          find /host-free -mindepth 2 -maxdepth 2 -exec rm -rf {} + 2>/dev/null || true
+          df -h "$GITHUB_WORKSPACE"
+
+      - name: Install the build tools (docs/BUILDING.md, Requirements)
+        run: |
+          apt-get update
+          # BUILDING.md's list: clang-18, lld-18 and the LLVM 18 tools; cmake, ninja, git, make, python3;
+          # for RADV meson, mako, packaging, rsync, flex, glslangValidator, and LLVM, Clang, libclc,
+          # SPIRV-Tools and the SPIR-V translator for Mesa's OpenCL kernels. Also what a minimal image
+          # lacks: wget/unzip (the boilerplate's SDK), rev (bsdextrautils, the SDK's wrappers), flock
+          # (util-linux), the CA certificates (package.sh ships them as the app's cacert.pem).
+          apt-get install --yes --no-install-recommends \
+            ca-certificates git curl wget unzip zip xz-utils file make build-essential pkgconf \
+            bsdextrautils util-linux patch rsync ccache \
+            cmake ninja-build bison flex glslang-tools spirv-tools \
+            python3 python3-pip python3-venv \
+            clang-18 lld-18 llvm-18 llvm-18-dev libclang-18-dev libclc-18-dev \
+            libllvmspirvlib-18-dev llvm-spirv-18 zlib1g-dev
+          # as BUILDING.md: meson, mako and packaging from pip (Ubuntu 24.04's meson is older than Mesa's minimum)
+          python3 -m pip install --break-system-packages --no-cache-dir meson mako packaging
+          git config --global --add safe.directory '*'
+          for tool in clang-18 clang++-18 ld.lld-18 llvm-ar-18 llvm-ranlib-18 llvm-nm-18 llvm-config-18 meson ninja; do
+            command -v "$tool" >/dev/null || { echo "missing $tool" >&2; exit 2; }
+          done
+          clang-18 --version | head -n 1
+          meson --version
+
+      - uses: actions/checkout@v7
+
+      - name: Locate the caches
+        run: |
+          cache_root="$GITHUB_WORKSPACE/../ci-cache"
+          mkdir -p "$cache_root"
+          cache_root=$(cd "$cache_root" && pwd)
+          version=$(sed -n 's/^VERSION := *//p' Makefile)
+          [[ -n $version ]] || { echo "no VERSION in the Makefile" >&2; exit 2; }
+          {
+            echo "CACHE_ROOT=$cache_root"
+            echo "PS5CEMU_DEPS_CACHE=$cache_root/downloads"
+            echo "CCACHE_DIR=$cache_root/ccache"
+            echo "JOBS=$(nproc)"
+            echo "VERSION=$version"
+            echo "SHORT_SHA=${GITHUB_SHA:0:7}"
+          } >> "$GITHUB_ENV"
+          echo "PS5CEMU-HAR $version at ${GITHUB_SHA:0:7}, $(nproc) jobs"
+
+      - name: Restore downloads
+        uses: actions/cache@v5
+        with:
+          # deps.py's archives and files (PS5CEMU_DEPS_CACHE), by their pinned SHA-256s
+          path: ${{ env.CACHE_ROOT }}/downloads
+          key: ps5cemu-downloads-${{ hashFiles('tools/deps.json') }}
+          restore-keys: ps5cemu-downloads-
+
+      - name: Restore the PS5 libraries (build/sysroot)
+        id: sysroot
+        uses: actions/cache/restore@v5
+        with:
+          path: build/sysroot
+          key: ps5cemu-sysroot-${{ hashFiles('tools/deps.json', 'tools/build-deps.sh', 'tools/ps5.cmake', 'tools/env.sh') }}
+
+      - name: The boilerplate, with zlib from its GitHub release
+        run: |
+          # deps.py keeps a checkout that exists and runs only its setup (the payload SDK and zlib): the
+          # boilerplate is cloned here at its pin first, so zlib can be in place when the setup runs
+          read -r url commit path < <(python3 -c '
+          import json
+          item = next(i for i in json.load(open("tools/deps.json"))["items"] if i["name"] == "boilerplate")
+          print(item["url"], item["commit"], item["path"])')
+          if [[ ! -d $path/.git ]]; then
+            git init -q "$path"
+            git -C "$path" remote add origin "$url"
+            git -C "$path" fetch -q --depth 1 origin "$commit"
+            git -C "$path" checkout -q --detach "$commit"
+          fi
+          bash .github/scripts/seed-zlib.sh "$path"
+
+      - name: make deps
+        run: make deps
+
+      - name: Save the PS5 libraries
+        if: steps.sysroot.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: build/sysroot
+          key: ps5cemu-sysroot-${{ hashFiles('tools/deps.json', 'tools/build-deps.sh', 'tools/ps5.cmake', 'tools/env.sh') }}
+
+      - name: Restore the RADV driver
+        id: radv
+        uses: actions/cache/restore@v5
+        with:
+          # PS5_Vulkan's recipe build and the patched one tools/link.sh links: with both in place and
+          # their PROVENANCE.txt matching, make radv builds nothing
+          path: |
+            .deps/PS5_Vulkan/.deps/native/radv-release
+            .deps/PS5_Vulkan/.deps/native/radv-ps5cemu
+          key: ps5cemu-radv-${{ inputs.radv_patches }}-${{ hashFiles('tools/deps.json', 'tools/build-radv.sh', 'patches/mesa/**') }}
+
+      - name: make radv
+        env:
+          INPUT_RADV_PATCHES: ${{ inputs.radv_patches }}
+        run: |
+          bash .github/scripts/seed-zlib.sh .deps/PS5_Vulkan
+          bash .github/scripts/seed-mesa-wrap.sh .deps/PS5_Vulkan .deps/PS5_Mesa
+          case $INPUT_RADV_PATCHES in
+            '') ;;                                  # the Makefile's default
+            none) export RADV_PATCHES= ;;           # the recipe's archive as it is
+            all) export RADV_PATCHES=all ;;
+            *)
+              [[ $INPUT_RADV_PATCHES =~ ^[0-9]{4}(,[0-9]{4})*$ ]] ||
+                { echo "radv_patches: patch numbers (0004,0006), all or none" >&2; exit 2; }
+              export RADV_PATCHES=$INPUT_RADV_PATCHES ;;
+          esac
+          if ! make radv; then
+            for log in .deps/PS5_Vulkan/.deps/work/*.log; do
+              [[ -f $log ]] && { echo "::group::$log"; tail -n 60 "$log"; echo "::endgroup::"; }
+            done
+            exit 1
+          fi
+          cat .deps/PS5_Vulkan/.deps/native/radv-ps5cemu/PROVENANCE.txt
+
+      - name: Save the RADV driver
+        if: steps.radv.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            .deps/PS5_Vulkan/.deps/native/radv-release
+            .deps/PS5_Vulkan/.deps/native/radv-ps5cemu
+          key: ps5cemu-radv-${{ inputs.radv_patches }}-${{ hashFiles('tools/deps.json', 'tools/build-radv.sh', 'patches/mesa/**') }}
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v5
+        with:
+          path: ${{ env.CACHE_ROOT }}/ccache
+          key: ps5cemu-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ps5cemu-ccache-
+
+      - name: make release
+        timeout-minutes: 300
+        env:
+          INPUT_RADV_PATCHES: ${{ inputs.radv_patches }}
+        run: |
+          ccache --zero-stats
+          # the same patches as make radv, or make build would build the driver again with the default
+          case $INPUT_RADV_PATCHES in
+            '') ;;
+            none) export RADV_PATCHES= ;;
+            *) export RADV_PATCHES=$INPUT_RADV_PATCHES ;;
+          esac
+          make release
+
+      - name: Report disk and ccache
+        if: always()
+        run: |
+          df -h "$GITHUB_WORKSPACE"
+          ccache --show-stats || true
+
+      - name: Save ccache
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: ${{ env.CACHE_ROOT }}/ccache
+          key: ps5cemu-ccache-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Check the package
+        run: |
+          zip="dist/PS5CEMU-HAR-v$VERSION.zip"
+          (cd dist && sha256sum --check --strict SHA256SUMS)
+          python3 - "$zip" <<'PY'
+          import json, sys, zipfile
+          with zipfile.ZipFile(sys.argv[1]) as z:
+              names = set(z.namelist())
+              for needed in ("PPSA99360/eboot.bin", "PPSA99360/sce_sys/param.json", "PPSA99360/sce_module/libc.prx"):
+                  if needed not in names:
+                      sys.exit(f"{needed} is not in {sys.argv[1]}")
+              param = json.loads(z.read("PPSA99360/sce_sys/param.json"))
+              print(f"{sys.argv[1]}: {len(names)} entries; {param['titleId']} {param['contentVersion']}")
+          PY
+          if [[ $GITHUB_REF_TYPE == tag && $GITHUB_REF_NAME != "v$VERSION" ]]; then
+            echo "the tag $GITHUB_REF_NAME is not the Makefile's VERSION (v$VERSION)" >&2
+            exit 2
+          fi
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: PS5CEMU-HAR-v${{ env.VERSION }}-${{ env.SHORT_SHA }}
+          path: |
+            dist/PS5CEMU-HAR-v${{ env.VERSION }}.zip
+            dist/SHA256SUMS
+          retention-days: 14
+
+      # The unstripped ELF that reads this build's crash reports (BUILDING.md, Crash reports): kept
+      # longer, as crash reports come in after a build is tried
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ps5cemu-elf-v${{ env.VERSION }}-${{ env.SHORT_SHA }}
+          path: dist/ps5cemu-v${{ env.VERSION }}.elf
+          retention-days: 90
