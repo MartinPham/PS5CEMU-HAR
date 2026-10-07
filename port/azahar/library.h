@@ -39,4 +39,7 @@ namespace ps5azahar
 		std::vector<uint8_t> icon; // 48x48 BGRA, top-down, when it has one
 	};
 	Title Inspect(const std::string& path);
+	// The game in one file (a forwarder's --rom, app/forward.h), or an Artic Base address, as the
+	// scan would list it: whether or not it is in the game files folder.
+	ps5emu::Game GameAt(const std::string& path);
 }

@@ -9,8 +9,12 @@
 //  4. the game, on Cemu's or Azahar's Vulkan renderer, until the in-game menu (touchpad + Options)
 //     asks for the library, which starts PS5CEMU-HAR over (app/emulator.h, RestartToLibrary) on
 //     that emulator's side.
+// A home screen forwarder's --rom (app/forward.h, docs/FORWARDER.md) skips 3: its game starts at once,
+// and --exit-after-game closes the app where 4 would start it over.
 
+#include "app/boxart.h"
 #include "app/emulator.h"
+#include "app/forward.h"
 #include "app/pack_updates.h"
 #include "app/paths.h"
 #include "app/updates.h"
@@ -28,6 +32,7 @@
 #include "ps5/privilege.h"
 #include "ps5/threads.h"
 #include "ps5/window.h"
+#include <utility>
 
 // The PS4 SDK's version record: its size is set by the caller (libkernel)
 struct SceKernelSwVersion
@@ -123,9 +128,85 @@ int main(int argc, char* argv[])
 	ps5settings::Launcher settings = ps5settings::Load();
 	// the update notice, on a fresh start only (not each time a game hands back to the library)
 	const bool freshStart = settings.side.empty();
-	// still before any thread: the game folders and drives the HEN may have left out (#16)
+	// A forwarder's game (--rom): a relative path is looked for in its side's game files folder (both,
+	// the Wii U's first, when neither --type nor its extension says which). Every restart of the app
+	// (RestartToLibrary) runs without arguments, so the game starts once.
+	const ps5forward::Args forward = ps5forward::Parse(argc, argv);
+	ps5forward::Type forwardType = forward.type;
+	if (forwardType == ps5forward::Type::Unknown && forward.typeText.empty())
+		forwardType = ps5forward::IsArtic(forward.rom) ? ps5forward::Type::N3ds : ps5forward::TypeFromExtension(forward.rom);
+	// where to look, each with the side it means: an absolute path once (its side as known so far), a
+	// relative one in each side's folder that can be its
+	std::vector<std::pair<std::string, ps5forward::Type>> forwardCandidates;
+	if (!forward.rom.empty())
+	{
+		ps5log::Line("[forward] --rom {} --type {}{}", forward.rom, forward.typeText.empty() ? "(not given)" : forward.typeText,
+			forward.exitAfterGame ? " --exit-after-game" : "");
+		if (forward.rom.front() == '/' || ps5forward::IsArtic(forward.rom))
+			forwardCandidates.emplace_back(ps5forward::Resolve(forward.rom, ""), forwardType);
+		else
+		{
+			if (forwardType != ps5forward::Type::N3ds)
+				forwardCandidates.emplace_back(ps5forward::Resolve(forward.rom, settings.gamesFolder), ps5forward::Type::WiiU);
+			if (forwardType != ps5forward::Type::WiiU)
+				forwardCandidates.emplace_back(ps5forward::Resolve(forward.rom, settings.n3ds.gamesFolder), ps5forward::Type::N3ds);
+		}
+		std::erase_if(forwardCandidates, [](const auto& candidate) { return candidate.first.empty(); });
+	}
+	// still before any thread: the game folders and drives the HEN may have left out (#16), and the
+	// forwarded game's
 	if (privileges.filesystem)
-		ps5privilege::ReachFolders({settings.gamesFolder, settings.n3ds.gamesFolder});
+	{
+		std::vector<std::string> folders = {settings.gamesFolder, settings.n3ds.gamesFolder};
+		for (const auto& [path, type] : forwardCandidates)
+			if (const std::string folder = ps5forward::Folder(path); !folder.empty())
+				folders.push_back(folder);
+		ps5privilege::ReachFolders(folders);
+	}
+	// the forwarded game's file, once the folders can be read: its path and its emulator, or why not
+	std::string forwardPath, forwardError;
+	if (!forward.rom.empty())
+	{
+		if (!forward.typeText.empty() && forward.type == ps5forward::Type::Unknown)
+			forwardError = fmt::format("--type {} is neither wiiu nor 3ds", forward.typeText);
+		else if (forwardCandidates.empty())
+			forwardError = fmt::format("{} is not a path in the game files folder (no \"..\")", forward.rom);
+		else
+		{
+			std::error_code ec;
+			for (const auto& [path, side] : forwardCandidates)
+			{
+				const bool artic = ps5forward::IsArtic(path);
+				if (!artic && !std::filesystem::exists(path, ec))
+					continue;
+				const bool folder = !artic && std::filesystem::is_directory(path, ec);
+				// a folder is a Wii U game's (code/content/meta); an absolute file whose extension both
+				// emulators take (.elf), or none, needs --type
+				ps5forward::Type type = side;
+				if (type == ps5forward::Type::Unknown && folder)
+					type = ps5forward::Type::WiiU;
+				if (type == ps5forward::Type::Unknown)
+				{
+					forwardError = fmt::format("{}: say --type wiiu or --type 3ds for this file", path);
+					break;
+				}
+				if (folder && type == ps5forward::Type::N3ds)
+				{
+					forwardError = fmt::format("{} is a folder, not a 3DS game", path);
+					break;
+				}
+				forwardPath = path;
+				forwardType = type;
+				break;
+			}
+			if (forwardPath.empty() && forwardError.empty())
+				forwardError = fmt::format("{} was not found", forwardCandidates[0].first);
+		}
+		if (!privileges.filesystem)
+			forwardError.clear(); // the notice below says why nothing can be read
+		ps5log::Line("[forward] {}", forwardPath.empty() ? forwardError.empty() ? "no /data: the launcher instead" : forwardError :
+																fmt::format("{} on the {} side", forwardPath, ps5forward::TypeName(forwardType)));
+	}
 	ps5threads::SetPinning(settings.pinCpuThreads);
 	ps5log::ForwardDriverMessages();
 	// before either emulator's Vulkan driver starts, which reads it once
@@ -160,6 +241,15 @@ int main(int argc, char* argv[])
 			"PS5CEMU-HAR cannot reach /data. Load a HEN with PPSA99360 in its app jailbreak list, or elfldr, then restart PS5CEMU-HAR.";
 		ps5log::Line("[main] {}", status.notice);
 		ps5notify::Send(status.notice);
+	}
+	else if (!forwardError.empty())
+	{
+		// the forwarder's game could not be found: the launcher opens on its side (the Wii U's when
+		// unknown) and says why
+		const bool n3ds = forwardType == ps5forward::Type::N3ds;
+		(n3ds ? status.notice3ds : status.notice) = "Forwarded game not found: " + forwardError;
+		settings.side = n3ds ? "3ds" : "wiiu";
+		ps5notify::Send("Forwarded game not found: " + forwardError);
 	}
 	else if (!settings.launchError.empty())
 	{
@@ -210,8 +300,11 @@ int main(int argc, char* argv[])
 		ps5emu::LogMemory(); // Cemu's start, against the 3DS side's
 	};
 
-	if (freshStart && privileges.filesystem)
+	// no update check behind a forwarded game, which starts at once
+	if (freshStart && privileges.filesystem && forwardPath.empty())
 		ps5update::Start();
+	bool forwardPending = !forwardPath.empty();
+	bool forwarded = false; // the game now starting is the forwarder's
 	// the new launcher, unless L1 is held now (or ui.classic says so from an earlier start)
 	bool shell = ps5shell::Wanted(settings);
 	ps5log::Line("[main] the {} launcher", shell ? "new" : "classic");
@@ -220,7 +313,40 @@ int main(int argc, char* argv[])
 		SetHighFrameRate(false); // the launcher at 59.94 Hz
 		ps5display::SetFramePacing(1); // and the 3DS's games every refresh
 		std::optional<ps5launcher::Choice> choice;
-		if (shell)
+		forwarded = false;
+		if (std::exchange(forwardPending, false))
+		{
+			// the forwarder's game, as the launcher would hand it over: its side prepared, the background
+			// work stopped and the side's scan finished first (frontend/launcher.cpp StopBackgroundWork)
+			const ps5launcher::System system = forwardType == ps5forward::Type::N3ds ? ps5launcher::System::N3ds : ps5launcher::System::WiiU;
+			prepare(system);
+			if (system == ps5launcher::System::N3ds || status.coreReady)
+			{
+				ps5boxart::Stop();
+				ps5packs::Stop();
+				for (int waited = 0; system == ps5launcher::System::N3ds ? ps5azahar::Scanning() : ps5emu::Scanning(); waited++)
+				{
+					if (waited == 0)
+						ps5log::Line("[forward] waiting for the library's scan to finish");
+					sceKernelUsleep(16000);
+				}
+				ps5emu::Game game = system == ps5launcher::System::N3ds ? ps5azahar::GameAt(forwardPath) : ps5emu::GameAt(forwardPath);
+				if (game.titleId != 0)
+				{
+					// the library's last and recent games, as a launch from it records them
+					if (system == ps5launcher::System::N3ds)
+						ps5settings::AddRecent(settings.n3ds.lastGame, settings.n3ds.recent, game.titleId);
+					else
+						ps5settings::AddRecent(settings, game.titleId);
+					ps5settings::Save(settings);
+				}
+				ps5log::Line("[forward] starting {} ({})", game.name, game.format);
+				choice = ps5launcher::Choice{system, std::move(game)};
+				forwarded = true;
+			}
+			// else Cemu did not start: the launcher shows why (prepare set the notice)
+		}
+		if (!choice && shell)
 		{
 			switch (ps5shell::Run(settings, status, prepare, choice))
 			{
@@ -253,7 +379,7 @@ int main(int argc, char* argv[])
 					sceKernelUsleep(1000000);
 			}
 		}
-		else
+		else if (!choice)
 			choice = ps5launcher::Run(settings, status, prepare);
 		ps5update::Stop(); // nothing of the launcher's runs beside a game
 		ps5packs::Stop();
@@ -271,6 +397,8 @@ int main(int argc, char* argv[])
 			{
 				ps5azahar::RunGame();
 				RememberSide("3ds");
+				if (forwarded && forward.exitAfterGame)
+					ps5emu::ExitApp(); // --exit-after-game: to the home screen, not the library
 				ps5emu::RestartToLibrary();
 				return 0;
 			}
@@ -295,6 +423,8 @@ int main(int argc, char* argv[])
 		{
 			ps5emu::RunGame();
 			RememberSide("wiiu");
+			if (forwarded && forward.exitAfterGame)
+				ps5emu::ExitApp(); // --exit-after-game: to the home screen, not the library
 			ps5emu::RestartToLibrary();
 			return 0;
 		}

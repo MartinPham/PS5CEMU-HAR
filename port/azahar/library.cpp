@@ -433,4 +433,29 @@ namespace ps5azahar
 		std::error_code ec;
 		return fs::exists(path, ec) ? path : std::string();
 	}
+
+	ps5emu::Game GameAt(const std::string& path)
+	{
+		ps5emu::Game game;
+		game.path = path;
+		if (IsArtic(path))
+		{
+			// a 3DS on the network: Azahar's Artic loader reads the game from it
+			game.titleId = PathId(path);
+			game.name = path;
+			game.format = "ARTIC";
+			return game;
+		}
+		// as the scan lists a file (Scan), its icon written for the in-game menu
+		const Title title = Inspect(path);
+		game.titleId = title.titleId ? title.titleId : PathId(path);
+		game.name = !title.name.empty() ? title.name : fs::path(path).stem().string();
+		game.version = title.version;
+		game.format = title.encrypted ? "ENCRYPTED" : title.format;
+		game.publisher = title.publisher;
+		game.gameId = title.boxId;
+		if (!title.icon.empty())
+			WriteCover(game.titleId, title.icon);
+		return game;
+	}
 }

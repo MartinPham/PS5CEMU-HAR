@@ -56,6 +56,9 @@ namespace ps5emu
 	// for a scan in progress: it lists what was found so far.
 	std::vector<Game> ListGames();
 
+	// The game in a file or folder (a forwarder's --rom, app/forward.h): the library's entry for it
+	// when the scan found the same title, else what its own files say. Needs InitializeCore.
+	Game GameAt(const std::filesystem::path& path);
 	// The Vulkan renderer on VideoOut, then the title. False, with a reason, when it cannot start.
 	bool LaunchGame(const Game& game, std::string& error);
 
@@ -72,6 +75,9 @@ namespace ps5emu
 	// process (MainWindow::EndEmulation says so), so leaving a game means a fresh process; PS5SX2
 	// goes back to its shelf the same way. Returns only if the restart did not take.
 	void RestartToLibrary();
+	// Closes PS5Cemu, back to the PS5's home screen (a forwarder's --exit-after-game). Returns only if
+	// the system did not close it.
+	void ExitApp();
 
 	// A game's icon (meta/iconTex.tga) as an uncompressed top-down TGA in /data/ps5cemu/covers,
 	// extracted on first use; empty when the game has none or it cannot be read.

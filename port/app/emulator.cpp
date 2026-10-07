@@ -425,6 +425,23 @@ namespace ps5emu
 		return CafeTitleList::IsScanning();
 	}
 
+	namespace
+	{
+		// The game list's name for a title's format (launcher and in-game menu).
+		std::string FormatName(TitleInfo& title, const fs::path& path)
+		{
+			switch (title.GetFormat())
+			{
+			case TitleInfo::TitleDataFormat::WIIU_ARCHIVE: return "WUA";
+			case TitleInfo::TitleDataFormat::WUD:
+				return boost::iequals(_pathToUtf8(path.extension()), ".wux") ? "WUX" : "WUD";
+			case TitleInfo::TitleDataFormat::NUS: return "NUS";
+			case TitleInfo::TitleDataFormat::WUHB: return "WUHB";
+			default: return "FOLDER";
+			}
+		}
+	}
+
 	std::vector<Game> ListGames()
 	{
 		std::vector<Game> games;
@@ -447,20 +464,48 @@ namespace ps5emu
 			game.hasUpdate = info.HasUpdate();
 			game.version = game.hasUpdate ? info.GetUpdate().GetAppTitleVersion() : base.GetAppTitleVersion();
 			game.dlcCount = (uint32_t)info.GetAOC().size();
-			switch (base.GetFormat())
-			{
-			case TitleInfo::TitleDataFormat::WIIU_ARCHIVE: game.format = "WUA"; break;
-			case TitleInfo::TitleDataFormat::WUD:
-				game.format = boost::iequals(_pathToUtf8(game.path.extension()), ".wux") ? "WUX" : "WUD";
-				break;
-			case TitleInfo::TitleDataFormat::NUS: game.format = "NUS"; break;
-			case TitleInfo::TitleDataFormat::WUHB: game.format = "WUHB"; break;
-			default: game.format = "FOLDER"; break;
-			}
+			game.format = FormatName(base, game.path);
 			games.push_back(std::move(game));
 		}
 		std::sort(games.begin(), games.end(), [](const Game& a, const Game& b) { return boost::ilexicographical_compare(a.name, b.name); });
 		return games;
+	}
+
+	Game GameAt(const fs::path& path)
+	{
+		TitleInfo title{path};
+		if (title.IsValid())
+		{
+			// a game the scan found (in the game files folder or the MLC): as the library lists it, with
+			// its update and DLC, from the path given
+			const TitleId titleId = title.GetAppTitleId();
+			for (Game& listed : ListGames())
+				if (listed.titleId == titleId)
+				{
+					listed.path = path;
+					return listed;
+				}
+			Game game;
+			game.titleId = titleId;
+			game.name = title.GetMetaTitleName();
+			if (game.name.empty())
+				game.name = fmt::format("{:016x}", titleId);
+			game.path = path;
+			if (ParsedMetaXml* meta = title.GetMetaInfo())
+				game.gameId = BoxId(meta->GetProductCode(), meta->GetCompanyCode());
+			game.version = title.GetAppTitleVersion();
+			game.format = FormatName(title, path);
+			return game;
+		}
+		// an RPX or ELF on its own (LaunchGame says why when it is neither)
+		Game game;
+		game.name = _pathToUtf8(path.stem());
+		game.path = path;
+		std::string extension = _pathToUtf8(path.extension());
+		for (char& c : extension)
+			c = (char)std::toupper((unsigned char)c);
+		game.format = extension.empty() ? "RPX" : extension.substr(1);
+		return game;
 	}
 
 	bool LaunchGame(const Game& game, std::string& error)
@@ -652,6 +697,21 @@ namespace ps5emu
 			for (int i = 0; i < 100; i++)
 				sceKernelUsleep(100000);
 		ps5log::Line("[emu] LoadExec({}) returned {:#x}", eboot, (uint32_t)result);
+	}
+
+	void ExitApp()
+	{
+		// as RestartToLibrary, but out to the home screen: sceSystemServiceLoadExec("exit") ends an app
+		// properly (PS5SX2 and Porpoise close the same way; a return from main or _exit() raises SIGSYS)
+		ps5boxart::Stop();
+		ps5log::Line("[emu] closing PS5Cemu");
+		if (s_coreStarted)
+			GetConfigHandle().Save();
+		const int result = sceSystemServiceLoadExec("exit", nullptr);
+		if (result == 0)
+			for (int i = 0; i < 100; i++)
+				sceKernelUsleep(100000);
+		ps5log::Line("[emu] LoadExec(exit) returned {:#x}", (uint32_t)result);
 	}
 }
 
