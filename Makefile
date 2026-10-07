@@ -9,10 +9,13 @@ SHELL := /bin/bash
 MAKEFLAGS += --no-print-directory
 
 # The release's version, set here only: port/CMakeLists.txt and tools/package.sh (param.json) read it
-VERSION := 3.0.0
+VERSION := 3.0.1
 APP := build/app/PPSA99360
 JOBS ?= $(shell nproc)
 export JOBS
+# 3.0.1 Beta (BETA.md): every driver patch in patches/mesa, not only 0006, unless RADV_PATCHES says
+RADV_PATCHES ?= all
+export RADV_PATCHES
 
 .PHONY: help deps deps-status radv azahar build check package release clean distclean
 
@@ -23,8 +26,8 @@ help: ## List the targets
 	@echo
 	@echo 'Variables:'
 	@echo '  JOBS=$(JOBS)                parallel compile jobs'
-	@echo '  RADV_PATCHES=0006           the driver patches (patches/mesa) RADV is built with: their numbers,'
-	@echo '                              all, or empty for none (0006: 120 Hz output after the new launcher)'
+	@echo '  RADV_PATCHES=all            the driver patches (patches/mesa) RADV is built with: their numbers,'
+	@echo '                              all (the beta), or empty for none (0006: 120 Hz after the new launcher)'
 	@echo '  RADV_ARCHIVE, RADV_SDK      a RADV built elsewhere, and the SDK fork it was built with'
 
 deps: ## Fetch the pinned inputs and build the libraries Cemu needs for the PS5

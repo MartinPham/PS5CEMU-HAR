@@ -11,6 +11,10 @@
   <a href="docs/BUILDING.md">Building</a> · <a href="#credits">Credits</a>
 </p>
 
+> [!IMPORTANT]
+> **This is the `3.0.1-beta` branch: a test build, not a release.** [BETA.md](BETA.md) says what is
+> in it, and has the download (`beta/PS5CEMU-HAR-v3.0.1-beta.zip`) and how to test and build it.
+
 **PS5CEMU-HAR** is a homebrew app for jailbroken PS5 consoles. It bundles two emulators, both
 rendering with Vulkan through Mihawk's PS5 port of the RADV driver and played with the DualSense:
 
